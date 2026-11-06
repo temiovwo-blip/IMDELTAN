@@ -455,3 +455,46 @@ jobs:
             IF n<>1 THEN RAISE EXCEPTION 'Suspended eligibility changed'; END IF;
           END $test$;
           SQL
+      - name: Test full onboarding journey with a synthetic account
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$ DECLARE u uuid := gen_random_uuid(); BEGIN
+            INSERT INTO auth.users(id) VALUES (u);
+            PERFORM set_config('test.journey_user',u::text,false);
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.journey_user'),false);
+          SELECT public.initialize_own_onboarding();
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.complete_own_onboarding();
+              RAISE EXCEPTION 'Onboarding completed without eligibility';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT public.declare_adult_eligibility(true);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.complete_own_onboarding();
+              RAISE EXCEPTION 'Onboarding completed without policy acceptance';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          DO $test$ DECLARE policy_row record; BEGIN
+            FOR policy_row IN SELECT id FROM public.list_current_required_policies() LOOP
+              PERFORM public.accept_current_policy(policy_row.id);
+            END LOOP;
+          END $test$;
+          SELECT public.complete_own_onboarding();
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(user_id) INTO n FROM public.profiles;
+            IF n<>1 THEN RAISE EXCEPTION 'Completed account cannot read own profile'; END IF;
+          END $test$;
+          RESET ROLE;
+          INSERT INTO public.policy_versions(policy_key,version,content_url,content_sha256,mandatory,published_at)
+            VALUES ('journey-new-policy','1','https://example.invalid/new',repeat('f',64),true,now());
+          SET ROLE authenticated;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(user_id) INTO n FROM public.profiles;
+            IF n<>0 THEN RAISE EXCEPTION 'New mandatory policy not enforced on existing session'; END IF;
+          END $test$;
+          RESET ROLE;
+          SQL
