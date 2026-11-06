@@ -498,3 +498,50 @@ jobs:
           END $test$;
           RESET ROLE;
           SQL
+      - name: Test onboarding audit records with a synthetic account
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$ DECLARE u uuid := gen_random_uuid(); policy_id uuid := gen_random_uuid(); BEGIN
+            INSERT INTO auth.users(id) VALUES (u);
+            INSERT INTO public.policy_versions(id,policy_key,version,content_url,content_sha256,mandatory,published_at)
+              VALUES (policy_id,'audit-check','1','https://example.invalid/audit',repeat('e',64),true,now());
+            PERFORM set_config('test.audit_user',u::text,false);
+            PERFORM set_config('test.audit_policy',policy_id::text,false);
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.audit_user'),false);
+          SELECT public.initialize_own_onboarding();
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.declare_adult_eligibility(false);
+              RAISE EXCEPTION 'False declaration accepted';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+            BEGIN
+              INSERT INTO public.audit_logs(action,target_type,outcome) VALUES ('fake','test','success');
+              RAISE EXCEPTION 'Client audit insert allowed';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT public.declare_adult_eligibility(true);
+          DO $test$ DECLARE policy_row record; BEGIN
+            FOR policy_row IN SELECT id FROM public.list_current_required_policies() LOOP
+              PERFORM public.accept_current_policy(policy_row.id);
+            END LOOP;
+          END $test$;
+          SELECT public.accept_current_policy(current_setting('test.audit_policy')::uuid);
+          SELECT public.complete_own_onboarding();
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.audit_logs
+              WHERE actor_id=current_setting('test.audit_user')::uuid AND action='eligibility_status_changed'
+                AND target_type='user' AND target_id=current_setting('test.audit_user') AND outcome='success';
+            IF n<>1 THEN RAISE EXCEPTION 'Expected one successful eligibility audit record, got %',n; END IF;
+            SELECT count(*) INTO n FROM public.audit_logs
+              WHERE actor_id=current_setting('test.audit_user')::uuid AND action='policy_accepted'
+                AND target_type='policy_version' AND target_id=current_setting('test.audit_policy') AND outcome='success';
+            IF n<>1 THEN RAISE EXCEPTION 'Expected one idempotent policy audit record, got %',n; END IF;
+            SELECT count(*) INTO n FROM public.audit_logs
+              WHERE actor_id=current_setting('test.audit_user')::uuid AND action='account_state_changed'
+                AND target_type='user' AND target_id=current_setting('test.audit_user') AND outcome='success';
+            IF n<>1 THEN RAISE EXCEPTION 'Expected one account-state audit record, got %',n; END IF;
+          END $test$;
+          SQL
