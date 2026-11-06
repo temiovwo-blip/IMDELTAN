@@ -1,0 +1,79 @@
+name: Database integration (isolated PostgreSQL)
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: imdeltan_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d imdeltan_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: local_test_only
+      PGDATABASE: imdeltan_test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Create simulated Supabase identity prerequisites
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          CREATE SCHEMA auth;
+          CREATE TABLE auth.users (id uuid PRIMARY KEY);
+          SQL
+      - name: Apply the exact migrations to the disposable database
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            echo "Testing $migration"
+            psql -v ON_ERROR_STOP=1 --single-transaction -f "$migration"
+          done
+      - name: Check RLS, grants and selected constraints
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE t record; a uuid := gen_random_uuid(); b uuid := gen_random_uuid();
+          BEGIN
+            FOR t IN SELECT c.oid, c.relname, c.relrowsecurity FROM pg_class c
+              JOIN pg_namespace s ON s.oid = c.relnamespace
+              WHERE s.nspname = 'public' AND c.relkind = 'r'
+            LOOP
+              IF NOT t.relrowsecurity THEN RAISE EXCEPTION 'RLS missing on %', t.relname; END IF;
+              IF has_table_privilege('anon', t.oid, 'SELECT,INSERT,UPDATE,DELETE') OR
+                 has_table_privilege('authenticated', t.oid, 'SELECT,INSERT,UPDATE,DELETE') THEN
+                RAISE EXCEPTION 'Unexpected client privilege on %', t.relname;
+              END IF;
+            END LOOP;
+            INSERT INTO auth.users(id) VALUES (a), (b);
+            INSERT INTO public.friend_requests(sender_id, recipient_id) VALUES (a, b);
+            BEGIN
+              INSERT INTO public.friend_requests(sender_id, recipient_id) VALUES (b, a);
+              RAISE EXCEPTION 'Reciprocal pending request accepted';
+            EXCEPTION WHEN unique_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.user_blocks(blocker_id, blocked_id) VALUES (a, a);
+              RAISE EXCEPTION 'Self-block accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.user_reports(reason) VALUES ('synthetic');
+              RAISE EXCEPTION 'Targetless report accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+          END $test$;
+          SQL
