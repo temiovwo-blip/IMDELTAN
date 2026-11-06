@@ -356,3 +356,47 @@ jobs:
             IF n<>1 THEN RAISE EXCEPTION 'Other profile changed'; END IF;
           END $test$;
           SQL
+      - name: Test onboarding initialization with synthetic accounts
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE new_user uuid := gen_random_uuid(); suspended_user uuid := gen_random_uuid();
+            missing_user uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (new_user), (suspended_user);
+            INSERT INTO public.profiles(user_id,account_state) VALUES (suspended_user,'suspended');
+            INSERT INTO public.user_eligibility(user_id,status) VALUES (suspended_user,'revoked');
+            INSERT INTO public.user_privacy_settings(user_id,profile_visibility) VALUES (suspended_user,'private');
+            PERFORM set_config('test.new_onboarding_user',new_user::text,false);
+            PERFORM set_config('test.suspended_onboarding_user',suspended_user::text,false);
+            PERFORM set_config('test.missing_onboarding_user',missing_user::text,false);
+            IF has_function_privilege('anon','public.initialize_own_onboarding()','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous onboarding initialization allowed';
+            END IF;
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.new_onboarding_user'),false);
+          SELECT public.initialize_own_onboarding();
+          SELECT public.initialize_own_onboarding();
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.suspended_onboarding_user'),false);
+          SELECT public.initialize_own_onboarding();
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.missing_onboarding_user'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.initialize_own_onboarding();
+              RAISE EXCEPTION 'Unknown identity accepted';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.profiles WHERE user_id=current_setting('test.new_onboarding_user')::uuid AND account_state='pending';
+            IF n<>1 THEN RAISE EXCEPTION 'Pending profile initialization failed'; END IF;
+            SELECT count(*) INTO n FROM public.user_eligibility WHERE user_id=current_setting('test.new_onboarding_user')::uuid AND status='pending';
+            IF n<>1 THEN RAISE EXCEPTION 'Pending eligibility initialization failed'; END IF;
+            SELECT count(*) INTO n FROM public.user_privacy_settings WHERE user_id=current_setting('test.new_onboarding_user')::uuid AND profile_visibility='private';
+            IF n<>1 THEN RAISE EXCEPTION 'Private default initialization failed'; END IF;
+            SELECT count(*) INTO n FROM public.profiles p JOIN public.user_eligibility e ON e.user_id=p.user_id
+              WHERE p.user_id=current_setting('test.suspended_onboarding_user')::uuid AND p.account_state='suspended' AND e.status='revoked';
+            IF n<>1 THEN RAISE EXCEPTION 'Existing suspended state was reset'; END IF;
+          END $test$;
+          SQL
