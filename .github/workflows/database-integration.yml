@@ -121,3 +121,35 @@ jobs:
             EXCEPTION WHEN foreign_key_violation THEN NULL; END;
           END $test$;
           SQL
+      - name: Test the private eligibility gate with synthetic users
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE u uuid := gen_random_uuid(); v uuid := gen_random_uuid();
+            policy_a uuid := gen_random_uuid(); policy_b uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (u), (v);
+            INSERT INTO public.profiles(user_id, account_state) VALUES (u, 'active'), (v, 'active');
+            INSERT INTO public.user_eligibility(user_id, status, verification_method, verification_version, verified_at)
+              VALUES (u, 'eligible', 'test', 'test', now());
+            IF app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'Missing policy accepted'; END IF;
+            IF app_private.user_passes_platform_gate(NULL) THEN RAISE EXCEPTION 'Anonymous identity accepted'; END IF;
+            INSERT INTO public.policy_versions(id, policy_key, version, content_url, content_sha256, mandatory, published_at)
+              VALUES (policy_a, 'terms', '1', 'https://example.invalid/terms', repeat('a', 64), true, now());
+            IF app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'Missing policy acceptance accepted'; END IF;
+            INSERT INTO public.policy_acceptances(user_id, policy_version_id) VALUES (u, policy_a);
+            IF NOT app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'Eligible identity rejected'; END IF;
+            IF app_private.user_passes_platform_gate(v) THEN RAISE EXCEPTION 'Ineligible identity accepted'; END IF;
+            INSERT INTO public.policy_versions(id, policy_key, version, content_url, content_sha256, mandatory, published_at)
+              VALUES (policy_b, 'privacy', '1', 'https://example.invalid/privacy', repeat('b', 64), true, now());
+            IF app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'New policy not enforced'; END IF;
+            INSERT INTO public.policy_acceptances(user_id, policy_version_id) VALUES (u, policy_b);
+            IF NOT app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'Policy-complete identity rejected'; END IF;
+            UPDATE public.profiles SET account_state = 'suspended' WHERE user_id = u;
+            IF app_private.user_passes_platform_gate(u) THEN RAISE EXCEPTION 'Suspended identity accepted'; END IF;
+            IF has_function_privilege('anon', 'app_private.user_passes_platform_gate(uuid)', 'EXECUTE') OR
+               has_function_privilege('authenticated', 'app_private.user_passes_platform_gate(uuid)', 'EXECUTE') THEN
+              RAISE EXCEPTION 'Client can execute private gate';
+            END IF;
+          END $test$;
+          SQL
