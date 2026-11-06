@@ -400,3 +400,58 @@ jobs:
             IF n<>1 THEN RAISE EXCEPTION 'Existing suspended state was reset'; END IF;
           END $test$;
           SQL
+      - name: Test adult self-declaration with synthetic accounts
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE claimant uuid := gen_random_uuid(); revoked_user uuid := gen_random_uuid(); suspended_user uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (claimant),(revoked_user),(suspended_user);
+            INSERT INTO public.profiles(user_id,account_state) VALUES (claimant,'pending'),(revoked_user,'pending'),(suspended_user,'suspended');
+            INSERT INTO public.user_eligibility(user_id,status) VALUES (claimant,'pending'),(revoked_user,'revoked'),(suspended_user,'pending');
+            PERFORM set_config('test.adult_claimant',claimant::text,false);
+            PERFORM set_config('test.adult_revoked',revoked_user::text,false);
+            PERFORM set_config('test.adult_suspended',suspended_user::text,false);
+            IF has_function_privilege('anon','public.declare_adult_eligibility(boolean)','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous adult declaration allowed';
+            END IF;
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.adult_claimant'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.declare_adult_eligibility(false);
+              RAISE EXCEPTION 'False declaration accepted';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+            BEGIN
+              PERFORM public.declare_adult_eligibility(NULL);
+              RAISE EXCEPTION 'Null declaration accepted';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT public.declare_adult_eligibility(true);
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.adult_revoked'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.declare_adult_eligibility(true);
+              RAISE EXCEPTION 'Revoked eligibility reset';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.adult_suspended'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.declare_adult_eligibility(true);
+              RAISE EXCEPTION 'Suspended user could declare';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.user_eligibility
+              WHERE user_id=current_setting('test.adult_claimant')::uuid AND status='eligible'
+                AND verification_method='adult_self_declaration' AND verification_version='1' AND verified_at IS NOT NULL;
+            IF n<>1 THEN RAISE EXCEPTION 'Self-declaration not recorded correctly'; END IF;
+            SELECT count(*) INTO n FROM public.user_eligibility WHERE user_id=current_setting('test.adult_revoked')::uuid AND status='revoked';
+            IF n<>1 THEN RAISE EXCEPTION 'Revoked eligibility changed'; END IF;
+            SELECT count(*) INTO n FROM public.user_eligibility WHERE user_id=current_setting('test.adult_suspended')::uuid AND status='pending';
+            IF n<>1 THEN RAISE EXCEPTION 'Suspended eligibility changed'; END IF;
+          END $test$;
+          SQL
