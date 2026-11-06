@@ -1,0 +1,31 @@
+name: Customer app build
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  customer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/customer
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/customer/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check source syntax
+        run: node --check src/main.js
+      - name: Test customer privacy interface
+        run: node --test test/*.test.mjs
+      - name: Build customer app
+        run: npm run build
+      - name: Check production dependency advisories
+        run: npm audit --omit=dev --audit-level=high

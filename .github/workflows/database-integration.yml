@@ -42,6 +42,9 @@ jobs:
             SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
           $$;
           GRANT USAGE ON SCHEMA auth TO anon, authenticated;
+          CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$
+            SELECT coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb);
+          $$;
           -- A minimal test double, not Supabase Storage itself.
           CREATE SCHEMA storage;
           CREATE TABLE storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL, file_size_limit bigint, allowed_mime_types text[]);
@@ -483,6 +486,7 @@ jobs:
               PERFORM public.accept_current_policy(policy_row.id);
             END LOOP;
           END $test$;
+          SELECT public.set_own_lga((SELECT id FROM public.list_delta_lgas() WHERE name='Uvwie'));
           SELECT public.complete_own_onboarding();
           DO $test$ DECLARE n integer; BEGIN
             SELECT count(user_id) INTO n FROM public.profiles;
@@ -528,6 +532,7 @@ jobs:
             END LOOP;
           END $test$;
           SELECT public.accept_current_policy(current_setting('test.audit_policy')::uuid);
+          SELECT public.set_own_lga((SELECT id FROM public.list_delta_lgas() WHERE name='Okpe'));
           SELECT public.complete_own_onboarding();
           RESET ROLE;
           DO $test$ DECLARE n integer; BEGIN
@@ -603,3 +608,33 @@ jobs:
             IF n<>1 THEN RAISE EXCEPTION 'Privacy update not saved'; END IF;
           END $test$;
           SQL
+      - name: Test private post isolation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_posts.sql
+      - name: Test report review and admin MFA
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/report_review.sql
+      - name: Test onboarding status is self-only
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/onboarding_status.sql
+      - name: Test block recording and isolation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/block_users.sql
+      - name: Test own block list isolation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/list_own_blocks.sql
+      - name: Test friend requests and block interaction
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/friend_requests.sql
+      - name: Test friend request list and cancellation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/friend_request_management.sql
+      - name: Test private text post management
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/manage_private_posts.sql
+      - name: Test concurrent friend requests and blocks
+        run: python3 tests/integration/friend_request_races.py
+      - name: Test Delta communities and self LGA selection
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_communities.sql
+      - name: Test private LGA group creation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/create_lga_groups.sql
+      - name: Test owner-only group editing and archiving
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/manage_owned_groups.sql
+      - name: Test private group invitations
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_invitations.sql
+      - name: Test joined groups and leaving
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/joined_groups.sql
+      - name: Test exact group invitee search and privacy
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_invite_search.sql
