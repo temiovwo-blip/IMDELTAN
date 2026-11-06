@@ -301,3 +301,58 @@ jobs:
           END $test$;
           RESET ROLE;
           SQL
+      - name: Test profile edits with synthetic accounts
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE a uuid := gen_random_uuid(); b uuid := gen_random_uuid(); pending uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (a),(b),(pending);
+            INSERT INTO public.profiles(user_id,account_state,handle,display_name)
+              VALUES (a,'active','old_handle','Old'),(b,'active','already_taken','Other'),(pending,'pending',null,'Pending');
+            INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at)
+              VALUES (a,'eligible','test','test',now());
+            INSERT INTO public.policy_acceptances(user_id,policy_version_id)
+              SELECT a,id FROM public.policy_versions WHERE mandatory AND published_at <= now() AND retired_at IS NULL;
+            PERFORM set_config('test.profile_editor',a::text,false);
+            PERFORM set_config('test.profile_other',b::text,false);
+            PERFORM set_config('test.profile_pending',pending::text,false);
+            IF has_function_privilege('anon','public.update_own_profile(text,text,text)','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous profile updates allowed';
+            END IF;
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.profile_editor'),false);
+          SELECT public.update_own_profile('  NEW_HANDLE  ','  New Name  ','  Hello  ');
+          DO $test$
+          BEGIN
+            BEGIN
+              PERFORM public.update_own_profile('bad handle!','Name','Bio');
+              RAISE EXCEPTION 'Invalid handle accepted';
+            EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+            BEGIN
+              PERFORM public.update_own_profile('already_taken','Name','Bio');
+              RAISE EXCEPTION 'Duplicate handle accepted';
+            EXCEPTION WHEN unique_violation THEN NULL; END;
+            BEGIN
+              UPDATE public.profiles SET display_name='Not permitted';
+              RAISE EXCEPTION 'Direct update allowed';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.profile_pending'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.update_own_profile('pending_user','Name','Bio');
+              RAISE EXCEPTION 'Pending account could edit';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.profiles WHERE user_id=current_setting('test.profile_editor')::uuid
+              AND handle='new_handle' AND display_name='New Name' AND biography='Hello';
+            IF n<>1 THEN RAISE EXCEPTION 'Profile update did not normalize fields'; END IF;
+            SELECT count(*) INTO n FROM public.profiles WHERE user_id=current_setting('test.profile_other')::uuid
+              AND handle='already_taken' AND display_name='Other';
+            IF n<>1 THEN RAISE EXCEPTION 'Other profile changed'; END IF;
+          END $test$;
+          SQL
