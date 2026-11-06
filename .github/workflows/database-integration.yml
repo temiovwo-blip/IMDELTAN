@@ -545,3 +545,61 @@ jobs:
             IF n<>1 THEN RAISE EXCEPTION 'Expected one account-state audit record, got %',n; END IF;
           END $test$;
           SQL
+      - name: Test privacy preferences with separate synthetic accounts
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$ DECLARE a uuid := gen_random_uuid(); b uuid := gen_random_uuid(); pending uuid := gen_random_uuid(); BEGIN
+            INSERT INTO auth.users(id) VALUES (a),(b),(pending);
+            INSERT INTO public.profiles(user_id,account_state) VALUES (a,'active'),(b,'active'),(pending,'pending');
+            INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at)
+              VALUES (a,'eligible','test','test',now()),(b,'eligible','test','test',now());
+            INSERT INTO public.user_privacy_settings(user_id) VALUES (a),(b),(pending);
+            INSERT INTO public.policy_acceptances(user_id,policy_version_id)
+              SELECT users.id,pv.id FROM (VALUES (a),(b)) AS users(id)
+              CROSS JOIN public.policy_versions pv WHERE pv.mandatory AND pv.published_at <= now() AND pv.retired_at IS NULL;
+            PERFORM set_config('test.privacy_a',a::text,false);
+            PERFORM set_config('test.privacy_b',b::text,false);
+            PERFORM set_config('test.privacy_pending',pending::text,false);
+            IF has_function_privilege('anon','public.get_own_privacy_settings()','EXECUTE') OR
+               has_function_privilege('anon','public.update_own_privacy_settings(text,text)','EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous privacy function access allowed';
+            END IF;
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.privacy_a'),false);
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.get_own_privacy_settings()
+              WHERE profile_visibility='private' AND contact_permission='friends';
+            IF n<>1 THEN RAISE EXCEPTION 'Incorrect private defaults'; END IF;
+          END $test$;
+          SELECT public.update_own_privacy_settings('friends','members');
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM public.update_own_privacy_settings('invalid','members');
+              RAISE EXCEPTION 'Invalid privacy setting accepted';
+            EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+            BEGIN
+              UPDATE public.user_privacy_settings SET profile_visibility='public';
+              RAISE EXCEPTION 'Direct table update allowed';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.privacy_b'),false);
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.get_own_privacy_settings()
+              WHERE profile_visibility='private' AND contact_permission='friends';
+            IF n<>1 THEN RAISE EXCEPTION 'Another user privacy was changed'; END IF;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.privacy_pending'),false);
+          DO $test$ BEGIN
+            BEGIN
+              PERFORM * FROM public.get_own_privacy_settings();
+              RAISE EXCEPTION 'Pending user read privacy through guarded function';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.user_privacy_settings
+              WHERE user_id=current_setting('test.privacy_a')::uuid AND profile_visibility='friends' AND contact_permission='members';
+            IF n<>1 THEN RAISE EXCEPTION 'Privacy update not saved'; END IF;
+          END $test$;
+          SQL
