@@ -38,6 +38,10 @@ jobs:
           CREATE ROLE authenticated NOLOGIN;
           CREATE SCHEMA auth;
           CREATE TABLE auth.users (id uuid PRIMARY KEY);
+          CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+            SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+          $$;
+          GRANT USAGE ON SCHEMA auth TO anon, authenticated;
           -- A minimal test double, not Supabase Storage itself.
           CREATE SCHEMA storage;
           CREATE TABLE storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL, file_size_limit bigint, allowed_mime_types text[]);
@@ -153,3 +157,42 @@ jobs:
             END IF;
           END $test$;
           SQL
+      - name: Test private profile access when present
+        run: |
+          if [ "$(psql -Atqc "select to_regprocedure('app_private.current_user_passes_platform_gate()') is not null")" = "t" ]; then
+            psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE u uuid := gen_random_uuid(); other_user uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (u), (other_user);
+            INSERT INTO public.profiles(user_id, account_state, display_name)
+              VALUES (u, 'active', 'Test owner'), (other_user, 'active', 'Test other');
+            INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at)
+              VALUES (u,'eligible','test','test',now()), (other_user,'eligible','test','test',now());
+            INSERT INTO public.policy_acceptances(user_id,policy_version_id)
+              SELECT u,id FROM public.policy_versions WHERE mandatory AND published_at <= now() AND retired_at IS NULL;
+            PERFORM set_config('test.user_id', u::text, false);
+            PERFORM set_config('test.other_user_id', other_user::text, false);
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub', current_setting('test.user_id'), false);
+          DO $test$
+          DECLARE visible_count integer;
+          BEGIN
+            SELECT count(user_id) INTO visible_count FROM public.profiles;
+            IF visible_count <> 1 THEN RAISE EXCEPTION 'Expected exactly own profile, got %', visible_count; END IF;
+            BEGIN
+              PERFORM account_state FROM public.profiles;
+              RAISE EXCEPTION 'Private column visible';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub', current_setting('test.other_user_id'), false);
+          DO $test$ DECLARE visible_count integer; BEGIN
+            SELECT count(user_id) INTO visible_count FROM public.profiles;
+            IF visible_count <> 0 THEN RAISE EXCEPTION 'Unaccepted policy exposed profile'; END IF;
+          END $test$;
+          RESET ROLE;
+          SQL
+          else
+            echo "Profile read migration not present; test not applicable yet."
+          fi
