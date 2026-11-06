@@ -196,3 +196,58 @@ jobs:
           else
             echo "Profile read migration not present; test not applicable yet."
           fi
+      - name: Test policy acceptance through authenticated role
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE u uuid := gen_random_uuid(); suspended_user uuid := gen_random_uuid();
+            current_policy uuid := gen_random_uuid(); retired_policy uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (u), (suspended_user);
+            INSERT INTO public.profiles(user_id,account_state) VALUES (u,'pending'), (suspended_user,'suspended');
+            INSERT INTO public.policy_versions(id,policy_key,version,content_url,content_sha256,mandatory,published_at,retired_at)
+              VALUES (current_policy,'runtime-terms','1','https://example.invalid/terms',repeat('c',64),true,now(),null),
+                     (retired_policy,'runtime-old','1','https://example.invalid/old',repeat('d',64),true,now() - interval '1 day',now());
+            PERFORM set_config('test.accept_user',u::text,false);
+            PERFORM set_config('test.suspended_user',suspended_user::text,false);
+            PERFORM set_config('test.current_policy',current_policy::text,false);
+            PERFORM set_config('test.retired_policy',retired_policy::text,false);
+            IF has_function_privilege('anon', 'public.accept_current_policy(uuid)', 'EXECUTE') THEN
+              RAISE EXCEPTION 'Anonymous policy acceptance allowed';
+            END IF;
+          END $test$;
+          SET ROLE authenticated;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.accept_user'),false);
+          SELECT public.accept_current_policy(current_setting('test.current_policy')::uuid);
+          SELECT public.accept_current_policy(current_setting('test.current_policy')::uuid);
+          DO $test$
+          BEGIN
+            BEGIN
+              PERFORM public.accept_current_policy(current_setting('test.retired_policy')::uuid);
+              RAISE EXCEPTION 'Retired policy accepted';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+            BEGIN
+              INSERT INTO public.policy_acceptances(user_id,policy_version_id)
+                VALUES (current_setting('test.suspended_user')::uuid,current_setting('test.current_policy')::uuid);
+              RAISE EXCEPTION 'Direct insert allowed';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          SELECT set_config('request.jwt.claim.sub',current_setting('test.suspended_user'),false);
+          DO $test$
+          BEGIN
+            BEGIN
+              PERFORM public.accept_current_policy(current_setting('test.current_policy')::uuid);
+              RAISE EXCEPTION 'Suspended account accepted policy';
+            EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+          END $test$;
+          RESET ROLE;
+          DO $test$ DECLARE n integer; BEGIN
+            SELECT count(*) INTO n FROM public.policy_acceptances
+              WHERE user_id=current_setting('test.accept_user')::uuid
+                AND policy_version_id=current_setting('test.current_policy')::uuid;
+            IF n<>1 THEN RAISE EXCEPTION 'Expected one idempotent acceptance'; END IF;
+            SELECT count(*) INTO n FROM public.policy_acceptances
+              WHERE user_id=current_setting('test.suspended_user')::uuid;
+            IF n<>0 THEN RAISE EXCEPTION 'Suspended acceptance recorded'; END IF;
+          END $test$;
+          SQL
