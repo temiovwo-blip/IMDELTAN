@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">IMDELTAN Dev</string>
+    <string name="title_activity_main">IMDELTAN Dev</string>
+    <string name="package_name">com.imdeltan.community.dev</string>
+    <string name="custom_url_scheme">com.imdeltan.community.dev</string>
+</resources>

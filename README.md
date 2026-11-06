@@ -1,19 +1,25 @@
-# IMDELTAN — clean-slate rebuild
+# IMDELTAN — independent rebuild
 
-This repository is a new foundation, independent of previous projects and infrastructure. No old data, credentials or migrations are imported.
+IMDELTAN is a clean-slate social platform under development. It must not connect to or alter the earlier project, data, credentials or infrastructure. The owner chose a separate Android identity and signing arrangement (Option B).
 
-## Current status
+## Current state
 
-The initial architecture and a deliberately default-deny identity/policy migration are drafted. This is not a functioning application or a production-ready backend. The migration has not yet been run or verified against Supabase. No deployment or registration has been enabled.
+The repository contains draft Supabase migrations, customer and administrator web apps, a development Android wrapper, design previews and automated checks. The new development Supabase Auth service has been reached using only its publishable client key, but the application migrations have not yet been applied there and end-to-end app flows are not verified. Local PostgreSQL integration tests simulate parts of Supabase; they are not a security audit. Public registration remains closed. Do not use real credentials, personal content or reports in development previews.
 
-- `docs/database-architecture.md`: proposed entities, security and operational design.
-- `supabase/migrations/`: new migrations, starting with the identity foundation.
-- `.env.example`: names and descriptions only. Never put real secrets in this file or in Git.
+The product direction includes 25 Delta State LGA communities and groups within them. A person selects their LGA in account setup; no ethnicity is inferred. Some features are only drafts and many visible feed items are examples. See `docs/development-status.md` and `docs/community-design.md` for specifics and outstanding safety work.
 
-## Safety and release constraints
+## Structure
 
-Use new, isolated Supabase projects and environment-specific credentials. Never connect this repository to the old project. Service-role credentials are server-side secrets only. Public registration remains closed until legal and security approval, endpoint-level testing and explicit release approval. Existing infrastructure must remain untouched.
+- `apps/customer/`: customer web and Android development scaffold.
+- `apps/admin/`: admin web scaffold.
+- `supabase/migrations/`: ordered database migrations; none are production-approved.
+- `supabase/config.toml`: local CLI configuration, not proof of remote configuration.
+- `tests/` and `.github/workflows/`: static, UI, build and simulated-database checks.
+- `docs/`: architecture, safety, design and development status.
+- `.env.example`: variable names and descriptions only.
 
-The initial migration creates RLS-enabled tables and revokes application-role access. Features, reviewed policies, eligibility enforcement, authentication configuration, storage, tests, backup workflows and deployment infrastructure remain to be implemented. Do not apply to a production environment without review and successful isolated testing.
+## Guardrails
 
-Android is a separate new application (Option B); its application ID and signing custody remain to be established with the owner.
+Use new, isolated environments with environment-specific configuration. Never place a service-role key or private signing material in frontend code, Git or chat. Public registration requires legal and security approvals. Adult self-declaration is not independent proof of age. The development-only migration preview workflow requires manual invocation and runs `supabase db push --dry-run`; it does not deploy changes. Never deploy drafts to production or invite testers using real data before the documented safety and testing gates are met.
+
+See `docs/android-development.md` for direct-install APK preparation and `docs/security-test-plan.md` for test scope and limitations.

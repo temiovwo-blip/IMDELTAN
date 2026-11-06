@@ -1,0 +1,35 @@
+name: Development database migration preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: imdeltan-development-migrations
+  cancel-in-progress: false
+jobs:
+  preview:
+    # Create this protected environment and its secrets only after review.
+    environment: imdeltan-development
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.IMDELTAN_DEV_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: bdhcpgqxhnecrcopoxge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: '2.95.3'
+      - name: Validate target and configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_ID" = 'bdhcpgqxhnecrcopoxge'
+          test -n "$SUPABASE_ACCESS_TOKEN" && test -n "$SUPABASE_DB_PASSWORD" || { echo 'Development deployment secrets are missing.'; exit 1; }
+      - name: Link the new development project only
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+      - name: Preview unapplied migrations without applying them
+        run: supabase db push --dry-run
+      - name: Show migration history
+        run: supabase migration list --linked

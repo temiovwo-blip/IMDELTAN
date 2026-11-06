@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {JSDOM} from 'jsdom';
+const wait=()=>new Promise(resolve=>setTimeout(resolve,25));
+test('one menu opens, links to settings, and contains sign-out',async()=>{
+ const dom=new JSDOM('<!doctype html><div id="app"></div>',{url:'https://development.invalid/',runScripts:'outside-only'}),{window}=dom;
+ window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new window.Event('close'))};
+ let scrolled='';window.HTMLElement.prototype.scrollIntoView=function(){scrolled=this.id};
+ window.__client={auth:{getSession:async()=>({data:{session:{user:{id:'synthetic'}}}}),onAuthStateChange:()=>({}),signOut:async()=>({error:null})},rpc:async(name)=>{if(name==='get_own_onboarding_status')return {data:[{account_state:'active',eligibility_status:'eligible',policy_complete:true}],error:null};if(name==='list_current_required_policies'||name==='list_own_blocks')return {data:[],error:null};if(name==='get_own_privacy_settings')return {data:[{profile_visibility:'private',contact_permission:'friends'}],error:null};return {data:null,error:null}},from:(table)=>table==='profiles'?{select:()=>({maybeSingle:async()=>({data:{handle:'test_name',display_name:'Test',biography:''},error:null})})}:{select:()=>({order:()=>({limit:async()=>({data:[],error:null})})})}};
+ let source=await readFile(new URL('../src/main.js',import.meta.url),'utf8');source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
+ window.eval(source);await wait();const menu=window.document.querySelector('#menu-dialog');
+ assert.equal(window.document.querySelector('header #account'),null);
+ window.document.querySelector('#open-menu').click();assert.equal(menu.open,true);
+ window.document.querySelector('#close-menu').click();assert.equal(menu.open,false);
+ assert.equal(window.document.querySelector('#open-menu-bottom'),null);assert.match(window.document.querySelector('.mobile-nav').textContent,/Communities/);
+ window.document.querySelector('#open-menu').click();assert.equal(menu.open,true);
+ window.document.querySelector('#menu-privacy').click();assert.equal(menu.open,false);assert.equal(scrolled,'privacy');
+ window.document.querySelector('#open-menu').click();assert.equal(menu.contains(window.document.querySelector('#signout')),true);
+ window.document.querySelector('#signout').click();await wait();assert.equal(menu.open,false);assert.equal(window.document.querySelector('#auth-dialog').open,true);assert.equal(window.document.querySelector('#profile-editor').hidden,true);
+ dom.window.close();
+});
