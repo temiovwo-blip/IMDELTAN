@@ -1,0 +1,115 @@
+name: Database integration (isolated PostgreSQL)
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: local_test_only
+          POSTGRES_DB: imdeltan_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d imdeltan_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: local_test_only
+      PGDATABASE: imdeltan_test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Create simulated Supabase identity prerequisites
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          CREATE SCHEMA auth;
+          CREATE TABLE auth.users (id uuid PRIMARY KEY);
+          SQL
+      - name: Apply the exact migrations to the disposable database
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            echo "Testing $migration"
+            psql -v ON_ERROR_STOP=1 --single-transaction -f "$migration"
+          done
+      - name: Check RLS, grants and selected constraints
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE t record; a uuid := gen_random_uuid(); b uuid := gen_random_uuid();
+          BEGIN
+            FOR t IN SELECT c.oid, c.relname, c.relrowsecurity FROM pg_class c
+              JOIN pg_namespace s ON s.oid = c.relnamespace
+              WHERE s.nspname = 'public' AND c.relkind = 'r'
+            LOOP
+              IF NOT t.relrowsecurity THEN RAISE EXCEPTION 'RLS missing on %', t.relname; END IF;
+              IF has_table_privilege('anon', t.oid, 'SELECT,INSERT,UPDATE,DELETE') OR
+                 has_table_privilege('authenticated', t.oid, 'SELECT,INSERT,UPDATE,DELETE') THEN
+                RAISE EXCEPTION 'Unexpected client privilege on %', t.relname;
+              END IF;
+            END LOOP;
+            INSERT INTO auth.users(id) VALUES (a), (b);
+            INSERT INTO public.friend_requests(sender_id, recipient_id) VALUES (a, b);
+            BEGIN
+              INSERT INTO public.friend_requests(sender_id, recipient_id) VALUES (b, a);
+              RAISE EXCEPTION 'Reciprocal pending request accepted';
+            EXCEPTION WHEN unique_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.user_blocks(blocker_id, blocked_id) VALUES (a, a);
+              RAISE EXCEPTION 'Self-block accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.user_reports(reason) VALUES ('synthetic');
+              RAISE EXCEPTION 'Targetless report accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+          END $test$;
+          SQL
+      - name: Check more database relationship rules
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $test$
+          DECLARE a uuid := gen_random_uuid(); b uuid := gen_random_uuid();
+            p1 uuid := gen_random_uuid(); p2 uuid := gen_random_uuid();
+            comment1 uuid := gen_random_uuid(); conversation uuid := gen_random_uuid();
+          BEGIN
+            INSERT INTO auth.users(id) VALUES (a), (b);
+            INSERT INTO public.posts(id, author_id, body) VALUES (p1, a, 'test'), (p2, a, 'test');
+            INSERT INTO public.comments(id, post_id, author_id, body) VALUES (comment1, p1, a, 'test');
+            BEGIN
+              INSERT INTO public.comments(post_id, author_id, parent_id, body) VALUES (p2, a, comment1, 'test');
+              RAISE EXCEPTION 'Cross-post reply accepted';
+            EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.reactions(user_id, kind) VALUES (a, 'like');
+              RAISE EXCEPTION 'Reaction without target accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+            INSERT INTO public.reactions(user_id, post_id, kind) VALUES (a, p1, 'like');
+            BEGIN
+              INSERT INTO public.reactions(user_id, post_id, kind) VALUES (a, p1, 'like');
+              RAISE EXCEPTION 'Duplicate reaction accepted';
+            EXCEPTION WHEN unique_violation THEN NULL; END;
+            BEGIN
+              INSERT INTO public.user_eligibility(user_id, status) VALUES (a, 'eligible');
+              RAISE EXCEPTION 'Unverified eligibility accepted';
+            EXCEPTION WHEN check_violation THEN NULL; END;
+            INSERT INTO public.conversations(id, created_by) VALUES (conversation, a);
+            INSERT INTO public.conversation_participants(conversation_id, user_id) VALUES (conversation, a);
+            BEGIN
+              INSERT INTO public.messages(conversation_id, sender_id, body) VALUES (conversation, b, 'test');
+              RAISE EXCEPTION 'Nonparticipant message accepted';
+            EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+          END $test$;
+          SQL
