@@ -36,7 +36,17 @@ for file in files:
         if any(pattern.search(file.read_bytes()) for pattern in patterns):
             raise SystemExit('Possible sensitive value detected in '+str(file.relative_to(root)))
 with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED,compresslevel=8) as archive:
-    for file in sorted(files): archive.write(file,file.relative_to(root).as_posix())
+    for file in sorted(files):
+        name=file.relative_to(root).as_posix()
+        if name=='apps/customer/android/gradlew':
+            # ZIPs may be built on filesystems that lost the executable bit.
+            # Record the required Unix mode independently of the local mode.
+            info=zipfile.ZipInfo.from_file(file,name)
+            info.create_system=3
+            info.external_attr=(0o100755 << 16)
+            archive.writestr(info,file.read_bytes(),compress_type=zipfile.ZIP_DEFLATED,compresslevel=8)
+        else:
+            archive.write(file,name)
 with zipfile.ZipFile(target) as archive:
     if archive.testzip() is not None: raise SystemExit('Archive validation failed')
     names=archive.namelist()

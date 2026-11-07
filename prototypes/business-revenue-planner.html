@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>IMDELTAN — Business Revenue Planner</title>
+<style>
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#122544;background:#eef4fa;line-height:1.5}*{box-sizing:border-box}body{margin:0}main{max-width:1000px;margin:auto;padding:24px 16px 60px}.eyebrow{font-weight:800;font-size:.8rem;letter-spacing:.11em;color:#2264a1;text-transform:uppercase}h1{font-size:clamp(1.8rem,6vw,2.8rem);line-height:1.15;margin:.4rem 0}h2{font-size:1.15rem;margin:0 0 12px}p{margin:0 0 12px}.intro{max-width:68ch;color:#465a74}.notice{border-left:4px solid #d18928;background:#fff8e8;border-radius:8px;padding:14px 16px;margin:20px 0;color:#60491f}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:#fff;border:1px solid #d5e1ed;border-radius:16px;padding:20px;box-shadow:0 6px 20px #2345670a}.inputs{display:grid;grid-template-columns:1fr 1fr;gap:14px}label{display:block;font-weight:650;font-size:.92rem}input{display:block;width:100%;margin-top:6px;border:1px solid #a9bfd3;border-radius:9px;padding:11px;font:inherit;color:#122544;background:#fff}input:focus,button:focus{outline:3px solid #82b9ea;outline-offset:2px}.hint{display:block;color:#62758a;font-size:.76rem;font-weight:400;margin-top:4px}.results{display:grid;gap:10px}.metric{border-radius:12px;background:#f2f7fc;padding:14px}.metric span{display:block;color:#526880;font-size:.82rem}.metric strong{display:block;font-size:1.35rem;overflow-wrap:anywhere}.net{background:#e8f3ff}.muted{font-size:.86rem;color:#536981}.error{min-height:1.5em;color:#a12e21;font-size:.9rem;font-weight:650}.foot{margin-top:18px}.action{margin-top:18px;border:1px solid #2264a1;background:#fff;color:#1f5a91;border-radius:9px;font:inherit;font-weight:700;padding:10px 14px;cursor:pointer}@media(max-width:720px){.grid{grid-template-columns:1fr}}@media(max-width:410px){.inputs{grid-template-columns:1fr}.card{padding:16px}}
+</style>
+</head>
+<body><main>
+<div class="eyebrow">IMDELTAN · Founder planning tool</div>
+<h1>What could a business listing earn?</h1>
+<p class="intro">Explore a simple monthly scenario for paid business listings or sponsorships. Change the numbers to see the effect on revenue and costs.</p>
+<div class="notice"><strong>Illustrative only—not a forecast.</strong> The starting numbers are made-up examples, not actual prices, costs, customers or income. IMDELTAN does not yet accept payments or offer paid listings.</div>
+<div class="grid">
+<section class="card" aria-labelledby="assumptions"><h2 id="assumptions">Monthly assumptions</h2>
+<form id="planner" novalidate><div class="inputs">
+<label>Paying businesses<input id="businesses" type="number" min="0" max="1000000" step="1" value="20" inputmode="numeric"><span class="hint">One payment per business each month.</span></label>
+<label>Price per business (₦)<input id="price" type="number" min="0" max="100000000" step="0.01" value="5000" inputmode="decimal"></label>
+<label>Refunds (% of gross)<input id="refund" type="number" min="0" max="100" step="0.01" value="2" inputmode="decimal"></label>
+<label>Payment fees (% of gross)<input id="feePercent" type="number" min="0" max="100" step="0.01" value="1.5" inputmode="decimal"><span class="hint">Assumes fees are not returned on refunds.</span></label>
+<label>Payment fee per business (₦)<input id="feeFixed" type="number" min="0" max="100000000" step="0.01" value="0" inputmode="decimal"></label>
+<label>Hosting and software (₦)<input id="hosting" type="number" min="0" max="100000000000" step="0.01" value="70000" inputmode="decimal"></label>
+<label>Moderation and support (₦)<input id="support" type="number" min="0" max="100000000000" step="0.01" value="30000" inputmode="decimal"></label>
+<label>Marketing and other costs (₦)<input id="marketing" type="number" min="0" max="100000000000" step="0.01" value="20000" inputmode="decimal"></label>
+</div><p id="error" class="error" role="alert"></p><button class="action" id="reset" type="button">Reset example</button></form></section>
+<section class="card" aria-labelledby="results"><h2 id="results">Estimated monthly results</h2><div class="results" aria-live="polite" aria-atomic="true">
+<div class="metric"><span>Gross revenue</span><strong id="gross">—</strong></div>
+<div class="metric"><span>Refunds and payment fees</span><strong id="deductions">—</strong></div>
+<div class="metric"><span>Other monthly costs</span><strong id="costs">—</strong></div>
+<div class="metric net"><span>Estimated amount left before tax</span><strong id="net">—</strong></div>
+<div class="metric"><span>Paying businesses needed to break even</span><strong id="breakEven">—</strong></div>
+</div><p class="muted foot">Break-even assumes the same price, percentage deductions and fixed costs at every business count. A negative amount left means a loss.</p></section>
+</div>
+<section class="card foot" aria-labelledby="notes"><h2 id="notes">How to use this safely</h2><p class="muted">Gross is businesses × price. Refunds and percentage fees are calculated on gross; the fixed payment fee is charged once per business. The amount left subtracts those deductions and the three monthly cost inputs.</p><p class="muted">Taxes, chargebacks, per-refund fees, annual expenses, unpaid customers, price changes and many real-world costs are not automatically included. Use your own researched estimates and professional advice before making financial decisions. No outcome or income is guaranteed.</p><p class="muted"><strong>Privacy:</strong> this calculator runs in your browser and does not save or send your entries. It is a planning prototype, not part of the installed app.</p></section>
+</main>
+<script>
+(function(){
+'use strict';
+const specs={businesses:{max:1000000,integer:true},price:{max:100000000},refund:{max:100},feePercent:{max:100},feeFixed:{max:100000000},hosting:{max:100000000000},support:{max:100000000000},marketing:{max:100000000000}};
+const ids=['gross','deductions','costs','net','breakEven'];
+const el=id=>document.getElementById(id);
+const integerFormat=new Intl.NumberFormat('en-NG',{maximumFractionDigits:0});
+// Exact integer arithmetic: amounts are kobo and percentages are basis points.
+// Intermediate figures use one ten-thousandth of a kobo until final display.
+function parse(raw,spec){
+ if(raw.length>20||!/^(?:[0-9]+(?:\.[0-9]{0,2})?|\.[0-9]{1,2})$/.test(raw))return null;
+ const [whole,part='']=raw.split('.');
+ const units=BigInt(whole||'0')*100n+BigInt((part+'00').slice(0,2));
+ if(units>BigInt(spec.max)*100n||(spec.integer&&units%100n!==0n))return null;
+ return spec.integer?units/100n:units;
+}
+function money(scaled){
+ const negative=scaled<0n,absolute=negative?-scaled:scaled;
+ const kobo=(absolute+5000n)/10000n;
+ const display=integerFormat.format(kobo/100n)+'.'+String(kobo%100n).padStart(2,'0');
+ return (negative&&kobo!==0n?'-':'')+'₦'+display;
+}
+function update(){
+ const v={};
+ for(const [name,spec] of Object.entries(specs)){
+  const value=parse(el(name).value.trim(),spec);
+  if(value===null){
+   el('error').textContent='Enter valid non-negative values within the limits, using no more than two decimal places. Paying businesses must be a whole number; percentages cannot exceed 100.';
+   for(const id of ids)el(id).textContent='—';return;
+  }
+  v[name]=value;
+ }
+ const gross=v.businesses*v.price;
+ const deductions=gross*(v.refund+v.feePercent)+v.businesses*v.feeFixed*10000n;
+ const costs=(v.hosting+v.support+v.marketing)*10000n;
+ const contribution=v.price*(10000n-v.refund-v.feePercent)-v.feeFixed*10000n;
+ const net=gross*10000n-deductions-costs;
+ const threshold=costs===0n?0n:contribution>0n?(costs+contribution-1n)/contribution:null;
+ el('error').textContent='';
+ el('gross').textContent=money(gross*10000n);
+ el('deductions').textContent=money(deductions);
+ el('costs').textContent=money(costs);
+ el('net').textContent=money(net);
+ el('breakEven').textContent=threshold===null?'Not achievable with these assumptions':integerFormat.format(threshold);
+}
+el('planner').addEventListener('submit',event=>event.preventDefault());
+for(const id of Object.keys(specs))el(id).addEventListener('input',update);
+el('reset').addEventListener('click',()=>{el('planner').reset();update();});
+update();
+})();
+</script>
+</body></html>

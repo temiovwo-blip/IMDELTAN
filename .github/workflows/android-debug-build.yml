@@ -37,3 +37,56 @@ jobs:
         run: ./gradlew --no-daemon --max-workers=2 assembleDebug
       - name: Verify APK signature
         run: "$ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose android/app/build/outputs/apk/debug/app-debug.apk"
+      - name: Check normal debug identity and reject mismatched test flag
+        working-directory: apps/customer/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/imdeltan-apk.txt"
+          grep -Fq "package: name='com.imdeltan.community.dev'" "$RUNNER_TEMP/imdeltan-apk.txt"
+          grep -Fq "application-label:'IMDELTAN Dev'" "$RUNNER_TEMP/imdeltan-apk.txt"
+          test ! -f app/src/main/assets/public/imdeltan-synthetic-test-only.json
+          if ./gradlew --no-daemon --max-workers=2 -PimdeltanSyntheticOnly=true :app:preDebugBuild > "$RUNNER_TEMP/imdeltan-guard.txt" 2>&1; then
+            echo 'Synthetic Android flag accepted ordinary assets'; exit 1
+          fi
+          grep -Fq 'Synthetic Android property and web-asset marker must match' "$RUNNER_TEMP/imdeltan-guard.txt"
+          if ./gradlew --no-daemon --max-workers=2 -PimdeltanSyntheticOnly=true :app:preReleaseBuild > "$RUNNER_TEMP/imdeltan-guard.txt" 2>&1; then
+            echo 'Synthetic Android flag accepted release variant'; exit 1
+          fi
+          grep -Fq 'Synthetic assets or synthetic builds cannot be packaged as a release' "$RUNNER_TEMP/imdeltan-guard.txt"
+      - name: Build synthetic-only web assets using a fake key (no service calls)
+        env:
+          IMDELTAN_SYNTHETIC_PROJECT_REF: uxfyhpukeqttrvcfemts
+          IMDELTAN_SYNTHETIC_ONLY_CONFIRM: SYNTHETIC-ONLY-ISOLATED-PROJECT
+          VITE_SUPABASE_URL: https://uxfyhpukeqttrvcfemts.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_xxxxxxxxxxxxxxxxxxxxxxxx
+          VITE_ENABLE_SOCIAL_DRAFTS: 'true'
+        run: npm run build:synthetic-web && npx cap sync android
+      - name: Reject unsafe Android asset and release combinations
+        working-directory: apps/customer/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f app/src/main/assets/public/imdeltan-synthetic-test-only.json
+          if ./gradlew --no-daemon --max-workers=2 :app:preDebugBuild > "$RUNNER_TEMP/imdeltan-guard.txt" 2>&1; then
+            echo 'Synthetic assets accepted without test flag'; exit 1
+          fi
+          grep -Fq 'Synthetic Android property and web-asset marker must match' "$RUNNER_TEMP/imdeltan-guard.txt"
+          for flag in false true; do
+            if ./gradlew --no-daemon --max-workers=2 -PimdeltanSyntheticOnly="$flag" :app:preReleaseBuild > "$RUNNER_TEMP/imdeltan-guard.txt" 2>&1; then
+              echo 'Synthetic assets accepted for release'; exit 1
+            fi
+            grep -Fq 'Synthetic assets or synthetic builds cannot be packaged as a release' "$RUNNER_TEMP/imdeltan-guard.txt"
+          done
+      - name: Verify distinct synthetic debug APK (fake key; no service calls)
+        working-directory: apps/customer/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --max-workers=2 -PimdeltanSyntheticOnly=true :app:assembleDebug
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/imdeltan-apk.txt"
+          grep -Fq "package: name='com.imdeltan.community.dev.synthetic'" "$RUNNER_TEMP/imdeltan-apk.txt"
+          grep -Fq "application-label:'IMDELTAN Synthetic Test'" "$RUNNER_TEMP/imdeltan-apk.txt"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk > "$RUNNER_TEMP/imdeltan-apk-contents.txt"
+          grep -Fq 'assets/public/imdeltan-synthetic-test-only.json' "$RUNNER_TEMP/imdeltan-apk-contents.txt"
