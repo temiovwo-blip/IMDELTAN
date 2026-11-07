@@ -1,10 +1,20 @@
 apply plugin: 'com.android.application'
 
+// This build property is deliberately separate from web flags. It changes the
+// install identity and is checked against the copied web-asset marker below.
+def syntheticSetting = providers.gradleProperty('imdeltanSyntheticOnly').getOrElse('false')
+if (!(syntheticSetting in ['true', 'false'])) {
+    throw new GradleException('imdeltanSyntheticOnly must be true or false')
+}
+def syntheticOnly = syntheticSetting == 'true'
+def syntheticMarker = file('src/main/assets/public/imdeltan-synthetic-test-only.json')
+
 android {
     namespace "com.imdeltan.community.dev"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.imdeltan.community.dev"
+        applicationId(syntheticOnly ? "com.imdeltan.community.dev.synthetic" : "com.imdeltan.community.dev")
+        manifestPlaceholders = [imdeltanAppLabel: syntheticOnly ? 'IMDELTAN Synthetic Test' : 'IMDELTAN Dev']
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -20,6 +30,21 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+// Avoid accidentally packaging synthetic web assets as a normal app or any
+// release. This is an operational guard, not a defence against tampering.
+tasks.configureEach { task ->
+    if (task.name == 'preDebugBuild' || task.name == 'preReleaseBuild') {
+        task.doFirst {
+            if (task.name == 'preReleaseBuild' && (syntheticOnly || syntheticMarker.exists())) {
+                throw new GradleException('Synthetic assets or synthetic builds cannot be packaged as a release.')
+            }
+            if (syntheticOnly != syntheticMarker.exists()) {
+                throw new GradleException('Synthetic Android property and web-asset marker must match. Rebuild and sync the correct web assets.')
+            }
         }
     }
 }

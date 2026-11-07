@@ -1,0 +1,36 @@
+name: Synthetic test database migration preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: imdeltan-synthetic-test-migrations
+  cancel-in-progress: false
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    # Configure a separate main-only environment and project-scoped secrets.
+    environment: imdeltan-synthetic-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_SYNTHETIC_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.IMDELTAN_SYNTHETIC_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: uxfyhpukeqttrvcfemts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: '2.95.3'
+      - name: Validate synthetic-only target and configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_ID" = 'uxfyhpukeqttrvcfemts'
+          test -n "$SUPABASE_ACCESS_TOKEN" && test -n "$SUPABASE_DB_PASSWORD" || { echo 'Synthetic-test secrets are missing.'; exit 1; }
+      - name: Link the dedicated synthetic test project only
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+      - name: Preview unapplied migrations without applying them
+        run: supabase db push --dry-run
+      - name: Show migration history
+        run: supabase migration list --linked

@@ -740,3 +740,7 @@ jobs:
         run: python3 tests/integration/group_owner_members_races.py
       - name: Test private group removal notifications
         run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_member_removal_notices.sql
+      - name: Audit private-table RLS and security-definer privileges
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_security_catalog.sql
+      - name: Probe privileged functions with no caller identity
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/null_identity_security_probe.sql

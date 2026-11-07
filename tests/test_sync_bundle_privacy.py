@@ -12,9 +12,21 @@ class SyncBundlePrivacy(unittest.TestCase):
    subprocess.run(['python3',str(ROOT/'scripts/build_sync_bundle.py'),'--output',str(dest)],check=True,capture_output=True,text=True)
    with zipfile.ZipFile(dest) as z:
     names=z.namelist();base=folder.relative_to(ROOT).as_posix()+'/'
+    gradle=z.getinfo('apps/customer/android/gradlew')
+    self.assertEqual(gradle.create_system,3)
+    self.assertEqual((gradle.external_attr >> 16) & 0o777,0o755)
     self.assertIn(base+'safe.txt',names)
     for name in ('local.properties','.env.local','google-services.json','signing.key','private.pem','private.p12'):self.assertNotIn(base+name,names)
     self.assertFalse(any(n.endswith('/.env.local') or '/node_modules/' in n or '/dist/' in n or n.endswith(('.apk','.aab','.jks','.keystore')) for n in names))
+ def test_gradle_zip_mode_does_not_depend_on_source_permissions(self):
+  with tempfile.TemporaryDirectory(dir=ROOT.parent,prefix='bundle_mode_') as temp:
+   project=Path(temp)/'project'; (project/'scripts').mkdir(parents=True); (project/'apps/customer/android').mkdir(parents=True)
+   (project/'scripts/build_sync_bundle.py').write_bytes((ROOT/'scripts/build_sync_bundle.py').read_bytes())
+   wrapper=project/'apps/customer/android/gradlew';wrapper.write_text('#!/bin/sh\n');wrapper.chmod(0o644)
+   dest=Path(temp)/'test.zip'
+   subprocess.run(['python3',str(project/'scripts/build_sync_bundle.py'),'--output',str(dest)],check=True,capture_output=True,text=True)
+   with zipfile.ZipFile(dest) as z:
+    info=z.getinfo('apps/customer/android/gradlew');self.assertEqual(info.create_system,3);self.assertEqual((info.external_attr>>16)&0o777,0o755)
  def test_outside_workspace_is_rejected(self):
   r=subprocess.run(['python3',str(ROOT/'scripts/build_sync_bundle.py'),'--output','/tmp/outside-imdeltan.zip'],capture_output=True,text=True)
   self.assertNotEqual(r.returncode,0)
