@@ -1,0 +1,25 @@
+name: Synthetic test anonymous security smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: imdeltan-synthetic-anonymous-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main'
+    environment: imdeltan-synthetic-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run read-only synthetic anonymous checks
+        env:
+          IMDELTAN_SYNTHETIC_TESTS_CONFIRMED: SYNTHETIC-ONLY-UXFYHPUKEQTTRVCFEMTS
+          IMDELTAN_SYNTHETIC_PROJECT_URL: https://uxfyhpukeqttrvcfemts.supabase.co
+          IMDELTAN_SYNTHETIC_PUBLISHABLE_KEY: ${{ secrets.IMDELTAN_SYNTHETIC_PUBLISHABLE_KEY }}
+        run: python3 scripts/synthetic_anonymous_security_smoke.py
