@@ -1,0 +1,3 @@
+IMDELTAN SYNTHETIC TEST FIXTURE ONLY
+
+This text is a fictional test fixture. It is not legal terms, a privacy policy, a user agreement, or approval for public use. Do not use it outside the isolated synthetic test project. Test acceptance of this document does not establish consent, age, identity, or eligibility.

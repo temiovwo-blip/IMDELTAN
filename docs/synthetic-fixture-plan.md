@@ -1,0 +1,25 @@
+# Isolated synthetic test fixtures — draft only
+
+Target only project `uxfyhpukeqttrvcfemts`. This is a proposal, not evidence that accounts or rows exist. No public registration or real personal data. Do not use this plan or its fixtures in development, staging, production or any other project. Check project identity, migration history through 064, closed signup, existing user counts and cost/usage again immediately before provisioning. No real users must be present; stop on ambiguity.
+
+## Test boundaries
+
+Use two newly provisioned Auth users A and B, created by Supabase's supported admin API through a controlled privileged operation, not by manually inserting auth schema rows. Use non-deliverable, reserved example.test identities, random unique passwords or equivalent supported credentials and verified test-only email state; do not send mail. Do not place passwords, tokens, secret keys, service-role keys, or auth metadata in logs, Git, bundles, chats or screenshots. Never reuse accounts. Admin credentials must never enter the app. Do not assume a dashboard setting, fictional email domain or an account name alone enforces isolation.
+
+The platform gate requires active profiles, eligible verification fields, at least one current mandatory policy and acceptance of all current mandatory policy versions. The project's current policy table and identity inventory must be checked before any changes. If a fixture is provisioned, explicitly label it synthetic-test-only; use a stable, non-network placeholder URL on reserved example.test and the hash of an actual local test-only placeholder text. The test-only document is not a legal policy and must never be presented as such. Any direct fixture eligibility/acceptance entries simulate states for test purposes only; they do not verify age, residence, identity, consent or legal compliance. Prefer the ordinary app APIs for test actions where possible; privileged setup is not evidence that onboarding works.
+
+Test fixtures should include distinct users and one private post each, with fictional non-sensitive text and no upload. First prove each user can see their own expected row; then verify other-user isolation and privileged RPC/table denials using legitimate JWTs and server responses, with positive controls. A denied request alone can indicate an invalid credential rather than correct authorization. Verify same-LGA and distinct-LGA paths separately; same-LGA policy remains provisional. Add actual object and signed-URL checks later with small synthetic files and safe cleanup. Record only counts, pass/fail categories and test versions, not tokens or user data.
+
+## Cleanup and failure handling
+
+Before executing, design a fixture manifest with user and post IDs kept privately, ownership labels and an explicit cleanup order. Several references use ON DELETE RESTRICT: do not assume deleting an auth user cascades through all posts, policies or groups. Remove dependent synthetic-only rows deliberately in a reviewed transaction, verify no unrelated rows would be affected, then delete Auth users with the supported admin API. Verify zero remaining test users, fixtures and storage objects by aggregate counts; do not perform blanket deletes. Partial failure must stop further changes and be reconciled from a private manifest. Decide on expiry and remove temporary credentials and access afterwards. Never disable RLS or open signup for convenience.
+
+## Before implementation
+
+A guarded fixture provisioner, independently checked project binding, short-lived privileged credentials, robust cleanup, positive/negative JWT test flows and locally exercised failure cases still need implementation and review. The existing `dev_signed_in_security_smoke.py` is hard-pinned to the different dev project and MUST NOT be pointed at the synthetic project by configuration or used as-is. No actual fixtures or users are created by this document.
+
+## Read-only preflight and local tests, 2026-11-07
+
+The synthetic project was rechecked with aggregate SQL: zero auth users, policy versions, profiles, private posts and storage objects; 25 Delta LGAs and 25 LGA communities. Signup remained disabled in the preceding verification. This snapshot is not a perpetual guarantee and does not exhaustively inspect every table. `scripts/synthetic_fixture_preflight.sql` repeats those counts but cannot authenticate the target project; independently verify the target first. A clearly labelled fictional policy text is in `tests/fixtures/synthetic-only-placeholder-policy.txt`; its checksum must be computed from the exact file bytes before any fixture policy is created. It is not hosted or published, and no policy row has been inserted.
+
+Local synthetic-specific read-only anonymous and signed-in harnesses pin the synthetic URL and have mocked safety tests. Their checks are narrow, the signed-in harness needs existing JWT and private-post fixtures, and neither has run against the synthetic service. JWT payload decoding is not signature verification; the real Auth endpoint identity control is essential. These local files have not yet been synced to GitHub.
