@@ -33,4 +33,4 @@ DO $test$ DECLARE n int; BEGIN SELECT count(*) INTO n FROM public.list_own_joine
 DO $test$ DECLARE n int; BEGIN SELECT count(*) INTO n FROM public.list_own_unavailable_group_memberships() WHERE id=current_setting('test.joined_group')::uuid;IF n<>1 THEN RAISE EXCEPTION 'Unavailable membership not available for leaving';END IF;END $test$;
 SELECT public.leave_joined_group(current_setting('test.joined_group')::uuid);
 RESET ROLE;
-DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.community_group_memberships WHERE group_id=current_setting('test.joined_group')::uuid AND user_id=current_setting('test.joined_b')::uuid AND status='removed') THEN RAISE EXCEPTION 'Leave not recorded';END IF;END $test$;
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.community_group_memberships WHERE group_id=current_setting('test.joined_group')::uuid AND user_id=current_setting('test.joined_b')::uuid AND status='left') THEN RAISE EXCEPTION 'Leave not recorded';END IF;END $test$;

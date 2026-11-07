@@ -1,0 +1,52 @@
+DO $test$ DECLARE a uuid:=gen_random_uuid();b uuid:=gen_random_uuid();c uuid:=gen_random_uuid();d uuid:=gen_random_uuid();moduser uuid:=gen_random_uuid();l uuid;roleid uuid;BEGIN
+ SELECT id INTO l FROM public.lgas WHERE state_name='Delta' AND name='Uvwie';INSERT INTO auth.users(id) VALUES(a),(b),(c),(d),(moduser);
+ INSERT INTO public.profiles(user_id,account_state,lga_id) SELECT v.id,'active',l FROM (VALUES(a),(b),(c),(d),(moduser)) v(id);
+ INSERT INTO public.user_privacy_settings(user_id,profile_visibility,contact_permission) SELECT v.id,'public','members' FROM (VALUES(a),(b),(c),(d),(moduser)) v(id);
+ INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at) SELECT v.id,'eligible','test','test',now() FROM (VALUES(a),(b),(c),(d),(moduser)) v(id);
+ INSERT INTO public.policy_acceptances(user_id,policy_version_id) SELECT v.id,p.id FROM (VALUES(a),(b),(c),(d),(moduser)) v(id) CROSS JOIN public.policy_versions p WHERE p.mandatory AND p.published_at<=now() AND p.retired_at IS NULL;
+ SELECT id INTO roleid FROM public.admin_roles WHERE role_key='moderator';INSERT INTO public.admin_role_assignments(user_id,role_id) VALUES(moduser,roleid);
+ PERFORM set_config('test.greport_a',a::text,false);PERFORM set_config('test.greport_b',b::text,false);PERFORM set_config('test.greport_c',c::text,false);PERFORM set_config('test.greport_d',d::text,false);PERFORM set_config('test.greport_mod',moduser::text,false);
+ IF has_function_privilege('anon','public.list_private_group_post_reports_for_review()','EXECUTE') THEN RAISE EXCEPTION 'Anonymous review';END IF;
+END $test$;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_a'),false);
+SELECT set_config('test.greport_group',public.create_group_in_own_lga('Report group','')::text,false);
+SELECT public.invite_to_own_group(current_setting('test.greport_group')::uuid,current_setting('test.greport_b')::uuid);
+SELECT public.invite_to_own_group(current_setting('test.greport_group')::uuid,current_setting('test.greport_c')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_b'),false);
+SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.greport_group')::uuid),true);
+SELECT set_config('test.greport_post',public.create_private_group_text_post(current_setting('test.greport_group')::uuid,'Reported group text')::text,false);
+DO $test$ BEGIN BEGIN PERFORM public.report_private_group_text_post(current_setting('test.greport_post')::uuid,'Self');RAISE EXCEPTION 'Self report';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_d'),false);
+DO $test$ BEGIN BEGIN PERFORM public.report_private_group_text_post(current_setting('test.greport_post')::uuid,'Nonmember');RAISE EXCEPTION 'Nonmember report';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_c'),false);
+SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.greport_group')::uuid),true);
+SELECT set_config('test.greport_r1',public.report_private_group_text_post(current_setting('test.greport_post')::uuid,'Concern')::text,false);
+DO $test$ BEGIN IF public.report_private_group_text_post(current_setting('test.greport_post')::uuid,'Duplicate') IS NOT NULL THEN RAISE EXCEPTION 'Duplicate report';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_a'),false);
+SELECT set_config('test.greport_r2',public.report_private_group_text_post(current_setting('test.greport_post')::uuid,'Another concern')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_b'),false);
+SELECT public.delete_own_private_group_text_post(current_setting('test.greport_post')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_mod'),false);SELECT set_config('request.jwt.claims','{"aal":"aal1"}',false);
+DO $test$ BEGIN BEGIN PERFORM * FROM public.list_private_group_post_reports_for_review();RAISE EXCEPTION 'No MFA access';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claims','{"aal":"aal2"}',false);
+DO $test$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.list_private_group_post_reports_for_review() WHERE report_id=current_setting('test.greport_r1')::uuid AND post_body='Reported group text' AND post_status='deleted') THEN RAISE EXCEPTION 'Reported evidence lost';END IF;
+ IF EXISTS(SELECT 1 FROM public.list_reports_for_review() WHERE id=current_setting('test.greport_r1')::uuid) THEN RAISE EXCEPTION 'Wrong queue';END IF;
+ BEGIN PERFORM public.review_user_report(current_setting('test.greport_r1')::uuid,'closed','wrong queue');RAISE EXCEPTION 'Wrong review action';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+END $test$;
+SELECT public.review_private_group_post_report(current_setting('test.greport_r1')::uuid,'closed','Post already deleted');
+SELECT public.review_private_group_post_report(current_setting('test.greport_r2')::uuid,'reviewing','Review in progress');
+SELECT public.review_private_group_post_report(current_setting('test.greport_r2')::uuid,'closed','Post already deleted');
+-- Separate active reported post to test actual moderator removal.
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_b'),false);
+SELECT set_config('test.greport_post2',public.create_private_group_text_post(current_setting('test.greport_group')::uuid,'Moderated text')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_c'),false);
+SELECT set_config('test.greport_r3',public.report_private_group_text_post(current_setting('test.greport_post2')::uuid,'Concern')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_mod'),false);
+SELECT public.remove_reported_private_group_post(current_setting('test.greport_r3')::uuid,'Removal reason');
+SELECT set_config('request.jwt.claim.sub',current_setting('test.greport_a'),false);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_private_group_text_posts(current_setting('test.greport_group')::uuid) WHERE id=current_setting('test.greport_post2')::uuid) THEN RAISE EXCEPTION 'Removed post visible';END IF;END $test$;
+RESET ROLE;
+DO $test$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.moderation_records WHERE report_id=current_setting('test.greport_r3')::uuid AND action='private_group_post_removed') OR NOT EXISTS(SELECT 1 FROM public.audit_logs WHERE target_id=current_setting('test.greport_post2') AND action='private_group_post_removed') THEN RAISE EXCEPTION 'Removal records missing';END IF;
+END $test$;
