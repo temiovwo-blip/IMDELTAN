@@ -1,0 +1,44 @@
+-- Synthetic local users: author-only comment editing and report evidence.
+DO $test$ DECLARE a uuid:=gen_random_uuid();b uuid:=gen_random_uuid();c uuid:=gen_random_uuid();d uuid:=gen_random_uuid();l uuid;BEGIN
+ SELECT id INTO l FROM public.lgas WHERE state_name='Delta' AND name='Uvwie';INSERT INTO auth.users(id) VALUES(a),(b),(c),(d);
+ INSERT INTO public.profiles(user_id,account_state,lga_id) SELECT id,'active',l FROM (VALUES(a),(b),(c),(d))v(id);
+ INSERT INTO public.user_privacy_settings(user_id,profile_visibility,contact_permission) SELECT id,'public','members' FROM (VALUES(a),(b),(c),(d))v(id);
+ INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at) SELECT id,'eligible','test','test',now() FROM (VALUES(a),(b),(c),(d))v(id);
+ INSERT INTO public.policy_acceptances(user_id,policy_version_id) SELECT v.id,p.id FROM (VALUES(a),(b),(c),(d))v(id) CROSS JOIN public.policy_versions p WHERE p.mandatory AND p.published_at<=now() AND p.retired_at IS NULL;
+ PERFORM set_config('test.le_a',a::text,false);PERFORM set_config('test.le_b',b::text,false);PERFORM set_config('test.le_c',c::text,false);PERFORM set_config('test.le_d',d::text,false);
+ IF has_function_privilege('anon','public.edit_own_lga_post_comment(uuid,text)','EXECUTE') OR has_function_privilege('anon','public.list_lga_post_comments(uuid,timestamptz,uuid)','EXECUTE') OR NOT has_function_privilege('authenticated','public.edit_own_lga_post_comment(uuid,text)','EXECUTE') THEN RAISE EXCEPTION 'Wrong ACL';END IF;
+END $test$;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_a'),false);
+SELECT set_config('test.le_p',public.create_lga_text_post('Parent')::text,false);
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);
+SELECT set_config('test.le_comment',public.create_lga_post_comment(current_setting('test.le_p')::uuid,'Before')::text,false);
+SELECT set_config('test.le_second',public.create_lga_post_comment(current_setting('test.le_p')::uuid,'Another')::text,false);
+DO $test$ BEGIN
+ BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,'   ');RAISE EXCEPTION 'Blank accepted';EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+ BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,repeat('x',2001));RAISE EXCEPTION 'Oversize accepted';EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+ PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,' After ');
+ IF NOT EXISTS(SELECT 1 FROM public.list_lga_post_comments(current_setting('test.le_p')::uuid) WHERE id=current_setting('test.le_comment')::uuid AND body='After' AND edited_at IS NOT NULL) THEN RAISE EXCEPTION 'Edit or marker missing';END IF;
+END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.le_c'),false);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,'Other edit');RAISE EXCEPTION 'Other author edit';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('test.le_report',public.report_lga_post_comment(current_setting('test.le_comment')::uuid,'Concern')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,'After report');RAISE EXCEPTION 'Reported edit allowed';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;UPDATE public.user_reports SET status='closed' WHERE id=current_setting('test.le_report')::uuid;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_comment')::uuid,'After closed report');RAISE EXCEPTION 'Closed report edited';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT public.block_user(current_setting('test.le_a')::uuid);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_second')::uuid,'Blocked');RAISE EXCEPTION 'Blocked edit';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT public.unblock_user(current_setting('test.le_a')::uuid);SELECT public.set_own_lga((SELECT id FROM public.list_delta_lgas() WHERE name='Warri South'));
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_second')::uuid,'Left');RAISE EXCEPTION 'Different LGA edit';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.lga_post_comments WHERE id=current_setting('test.le_comment')::uuid AND body='After') THEN RAISE EXCEPTION 'Evidence changed';END IF;END $test$;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);SELECT public.set_own_lga((SELECT id FROM public.list_delta_lgas() WHERE name='Uvwie'));
+SELECT set_config('test.le_deleted',public.create_lga_post_comment(current_setting('test.le_p')::uuid,'Delete me')::text,false);SELECT public.delete_own_lga_post_comment(current_setting('test.le_deleted')::uuid);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_deleted')::uuid,'Revive');RAISE EXCEPTION 'Deleted edit allowed';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;UPDATE public.user_eligibility SET status='ineligible' WHERE user_id=current_setting('test.le_b')::uuid;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_second')::uuid,'Ineligible');RAISE EXCEPTION 'Ineligible edit allowed';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;UPDATE public.user_eligibility SET status='eligible' WHERE user_id=current_setting('test.le_b')::uuid;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.le_a'),false);SELECT public.delete_own_lga_text_post(current_setting('test.le_p')::uuid);SELECT set_config('request.jwt.claim.sub',current_setting('test.le_b'),false);
+DO $test$ BEGIN BEGIN PERFORM public.edit_own_lga_post_comment(current_setting('test.le_second')::uuid,'Deleted parent');RAISE EXCEPTION 'Deleted parent edit allowed';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;RESET ROLE;

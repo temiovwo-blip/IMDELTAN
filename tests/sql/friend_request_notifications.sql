@@ -1,0 +1,43 @@
+DO $test$ DECLARE a uuid:=gen_random_uuid();b uuid:=gen_random_uuid();c uuid:=gen_random_uuid(); BEGIN
+ INSERT INTO auth.users(id) VALUES(a),(b),(c);
+ INSERT INTO public.profiles(user_id,account_state) VALUES(a,'active'),(b,'active'),(c,'active');
+ INSERT INTO public.user_privacy_settings(user_id,profile_visibility,contact_permission) VALUES(a,'public','members'),(b,'public','members'),(c,'public','members');
+ INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at) SELECT v.id,'eligible','test','test',now() FROM (VALUES(a),(b),(c)) v(id);
+ INSERT INTO public.policy_acceptances(user_id,policy_version_id) SELECT v.id,p.id FROM (VALUES(a),(b),(c)) v(id) CROSS JOIN public.policy_versions p WHERE p.mandatory AND p.published_at<=now() AND p.retired_at IS NULL;
+ PERFORM set_config('test.notify_a',a::text,false);PERFORM set_config('test.notify_b',b::text,false);PERFORM set_config('test.notify_c',c::text,false);
+ IF has_table_privilege('authenticated','public.notifications','SELECT') OR has_function_privilege('anon','public.list_own_friend_request_notifications(timestamptz,uuid)','EXECUTE') THEN RAISE EXCEPTION 'Direct/anonymous access';END IF;
+END $test$;
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_a'),false);
+SELECT public.send_friend_request(current_setting('test.notify_b')::uuid);
+SELECT public.send_friend_request(current_setting('test.notify_b')::uuid);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_own_friend_request_notifications()) THEN RAISE EXCEPTION 'Sender sees recipient notices';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_b'),false);
+DO $test$ DECLARE n uuid;r uuid;stamp timestamptz; BEGIN
+ IF (SELECT count(*) FROM public.list_own_friend_request_notifications())<>1 THEN RAISE EXCEPTION 'Missing or duplicated notice';END IF;
+ SELECT id,request_id INTO n,r FROM public.list_own_friend_request_notifications();PERFORM set_config('test.notify_id',n::text,false);PERFORM set_config('test.notify_request',r::text,false);
+ PERFORM public.mark_own_friend_request_notification_read(n);SELECT read_at INTO stamp FROM public.list_own_friend_request_notifications() WHERE id=n;
+ IF stamp IS NULL THEN RAISE EXCEPTION 'Read status missing';END IF;
+ PERFORM public.mark_own_friend_request_notification_read(n);
+ IF (SELECT read_at FROM public.list_own_friend_request_notifications() WHERE id=n)<>stamp THEN RAISE EXCEPTION 'Read was not idempotent';END IF;
+ BEGIN PERFORM * FROM public.list_own_friend_request_notifications(now(),null);RAISE EXCEPTION 'Bad cursor';EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_c'),false);
+DO $test$ BEGIN
+ IF EXISTS(SELECT 1 FROM public.list_own_friend_request_notifications()) THEN RAISE EXCEPTION 'Other user sees notices';END IF;
+ BEGIN PERFORM public.mark_own_friend_request_notification_read(current_setting('test.notify_id')::uuid);RAISE EXCEPTION 'Other user changed notice';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_b'),false);
+SELECT public.respond_friend_request(current_setting('test.notify_request')::uuid,false);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_own_friend_request_notifications()) THEN RAISE EXCEPTION 'Resolved request notice visible';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_c'),false);
+SELECT public.send_friend_request(current_setting('test.notify_b')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.notify_b'),false);
+DO $test$ BEGIN IF (SELECT count(*) FROM public.list_own_friend_request_notifications())<>1 THEN RAISE EXCEPTION 'Second notice missing';END IF;END $test$;
+SELECT public.block_user(current_setting('test.notify_c')::uuid);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_own_friend_request_notifications()) THEN RAISE EXCEPTION 'Blocked notice visible';END IF;END $test$;
+RESET ROLE;
+UPDATE public.profiles SET account_state='suspended' WHERE user_id=current_setting('test.notify_b')::uuid;
+SET ROLE authenticated;
+DO $test$ BEGIN BEGIN PERFORM * FROM public.list_own_friend_request_notifications();RAISE EXCEPTION 'Suspended account access';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;

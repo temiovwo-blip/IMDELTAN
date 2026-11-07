@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Create a source-only sync bundle; excludes local environment and signing files."""
 from pathlib import Path
+import argparse
 import hashlib
 import re
 import zipfile
 
 root=Path(__file__).resolve().parents[1]
-target=root.parent/'IMDELTAN-delivery'/'IMDELTAN-update.zip'
+parser=argparse.ArgumentParser(description='Build a source-only review/sync bundle; never applies migrations.')
+parser.add_argument('--output',type=Path,default=root.parent/'IMDELTAN-delivery'/'IMDELTAN-update.zip')
+target=parser.parse_args().output.expanduser().resolve()
+if not target.is_relative_to(root.parent.resolve()) or target.suffix.lower()!='.zip':
+    raise SystemExit('Output must be a .zip inside the shared workspace')
 target.parent.mkdir(parents=True,exist_ok=True)
 include=['.github','apps','docs','prototypes','scripts','supabase','tests','.env.example','.gitignore','README.md']
 exclude={'node_modules','dist','build','.gradle','__pycache__','.git','.cache','capacitor-cordova-android-plugins'}
@@ -20,9 +25,10 @@ for name in include:
         rel=file.relative_to(root)
         if not file.is_file() or any(part in exclude for part in rel.parts): continue
         if file.name.startswith('.env') and file.name!='.env.example': continue
-        if file.name in {'local.properties','capacitor.config.json','capacitor.plugins.json'} and 'android/app/src/main/assets' in str(rel): continue
+        if file.name in {'local.properties','google-services.json'}: continue
+        if file.name in {'capacitor.config.json','capacitor.plugins.json'} and 'android/app/src/main/assets' in str(rel): continue
         if 'android/app/src/main/assets/public' in str(rel): continue
-        if file.suffix.lower() in {'.apk','.aab','.jks','.keystore','.log','.pyc'}: continue
+        if file.suffix.lower() in {'.apk','.aab','.jks','.keystore','.log','.pyc','.pem','.key','.p12','.pfx'}: continue
         files.append(file)
 patterns=[re.compile(rb'sb_secret_[A-Za-z0-9_]{15,}'),re.compile(rb'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'),re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')]
 for file in files:

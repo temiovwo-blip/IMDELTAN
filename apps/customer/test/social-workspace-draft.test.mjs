@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {mountSocialWorkspaceDraft} from '../src/social-workspace-draft.js';
+const wait=()=>new Promise(r=>setTimeout(r,15));
+test('social workspace connects friends to messages and clears on dispose',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');globalThis.document=dom.window.document;globalThis.window=dom.window;const calls=[];const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='list_own_friends')return {data:[{user_id:'friend',display_name:'Friend',handle:'friend'}],error:null};if(name==='list_own_friend_requests_display'||name==='list_friend_conversations'||name==='list_friend_messages')return {data:[],error:null};if(name==='start_friend_conversation')return {data:'chat1',error:null};return {error:null}}};
+ const root=document.querySelector('#root'),workspace=mountSocialWorkspaceDraft(root,client,'me');await wait();assert.equal(root.querySelector('[data-social-panel=friends]').hidden,false);
+ root.querySelector('.friend-row button').click();await wait();assert.equal(root.querySelector('[data-social-panel=messages]').hidden,false);assert.equal(root.querySelector('.messages-name').textContent,'Friend');assert.equal(calls.find(c=>c.name==='start_friend_conversation').args.p_friend_id,'friend');
+ root.querySelector('[data-social-tab=requests]').click();assert.equal(root.querySelector('[data-social-panel=requests]').hidden,false);workspace.dispose();assert.equal(root.childElementCount,0);dom.window.close();delete globalThis.document;delete globalThis.window;
+});

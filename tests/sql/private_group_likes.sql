@@ -1,0 +1,36 @@
+DO $test$ DECLARE a uuid:=gen_random_uuid();b uuid:=gen_random_uuid();c uuid:=gen_random_uuid();d uuid:=gen_random_uuid();l uuid;BEGIN
+ SELECT id INTO l FROM public.lgas WHERE state_name='Delta' AND name='Uvwie';INSERT INTO auth.users(id) VALUES(a),(b),(c),(d);INSERT INTO public.profiles(user_id,account_state,lga_id) SELECT v.id,'active',l FROM (VALUES(a),(b),(c),(d))v(id);
+ INSERT INTO public.user_privacy_settings(user_id,profile_visibility,contact_permission) SELECT v.id,'public','members' FROM (VALUES(a),(b),(c),(d))v(id);INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at) SELECT v.id,'eligible','test','test',now() FROM (VALUES(a),(b),(c),(d))v(id);
+ INSERT INTO public.policy_acceptances(user_id,policy_version_id) SELECT v.id,p.id FROM (VALUES(a),(b),(c),(d))v(id) CROSS JOIN public.policy_versions p WHERE p.mandatory AND p.published_at<=now() AND p.retired_at IS NULL;
+ PERFORM set_config('test.gl_a',a::text,false);PERFORM set_config('test.gl_b',b::text,false);PERFORM set_config('test.gl_c',c::text,false);PERFORM set_config('test.gl_d',d::text,false);
+ IF has_function_privilege('anon','public.get_private_group_post_like_summary(uuid)','EXECUTE') OR has_table_privilege('authenticated','public.private_group_post_likes','SELECT') THEN RAISE EXCEPTION 'Unsafe access';END IF;
+END $test$;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_a'),false);
+SELECT set_config('test.gl_group',public.create_group_in_own_lga('Group likes','')::text,false);
+SELECT set_config('test.gl_post',public.create_private_group_text_post(current_setting('test.gl_group')::uuid,'Group post')::text,false);
+SELECT public.invite_to_own_group(current_setting('test.gl_group')::uuid,current_setting('test.gl_b')::uuid);SELECT public.invite_to_own_group(current_setting('test.gl_group')::uuid,current_setting('test.gl_c')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_b'),false);
+SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.gl_group')::uuid),true);
+SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.get_private_group_post_like_summary(current_setting('test.gl_post')::uuid) WHERE like_count=1 AND liked_by_me) THEN RAISE EXCEPTION 'Like duplicate or missing';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_c'),false);
+SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.gl_group')::uuid),true);
+SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);
+SELECT public.block_user(current_setting('test.gl_b')::uuid);
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.get_private_group_post_like_summary(current_setting('test.gl_post')::uuid) WHERE like_count=1 AND liked_by_me) THEN RAISE EXCEPTION 'Blocked like leaked';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_d'),false);
+DO $test$ BEGIN
+ BEGIN PERFORM public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);RAISE EXCEPTION 'Nonmember liked';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+ BEGIN PERFORM * FROM public.get_private_group_post_like_summary(current_setting('test.gl_post')::uuid);RAISE EXCEPTION 'Nonmember summary';EXCEPTION WHEN insufficient_privilege THEN NULL;END;
+END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_b'),false);
+SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,false);
+SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,false);
+SELECT public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);
+SELECT public.leave_joined_group(current_setting('test.gl_group')::uuid);
+DO $test$ BEGIN BEGIN PERFORM * FROM public.get_private_group_post_like_summary(current_setting('test.gl_post')::uuid);RAISE EXCEPTION 'Former member summary';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gl_a'),false);
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.get_private_group_post_like_summary(current_setting('test.gl_post')::uuid) WHERE like_count=1 AND NOT liked_by_me) THEN RAISE EXCEPTION 'Former member like counted';END IF;END $test$;
+SELECT public.archive_own_group(current_setting('test.gl_group')::uuid);
+DO $test$ BEGIN BEGIN PERFORM public.set_private_group_post_like(current_setting('test.gl_post')::uuid,true);RAISE EXCEPTION 'Archived like';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+RESET ROLE;

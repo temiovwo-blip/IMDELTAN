@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {attachLgaInteractionsDraft} from '../src/lga-interactions-draft.js';
+const wait=()=>new Promise(r=>setTimeout(r,15));
+test('comments load older pages with timestamp and ID cursor, and discard late responses',async()=>{
+ const dom=new JSDOM('<article></article>');globalThis.document=dom.window.document;const calls=[];let resolveOlder;const first=Array.from({length:30},(_,i)=>({id:`id${i}`,created_at:`2026-01-01T00:00:${String(59-i).padStart(2,'0')}Z`,author_id:'other',author_name:'Neighbor',body:`Comment ${i}`}));
+ const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='get_lga_post_like_summary')return {data:[{like_count:0,liked_by_me:false}],error:null};if(name==='list_lga_post_comments')return args.p_before?new Promise(r=>{resolveOlder=r}):{data:first,error:null}}};
+ const article=document.querySelector('article');attachLgaInteractionsDraft(article,{id:'post'},client,'me');await wait();article.querySelector('.lga-comments-toggle').click();await wait();const more=article.querySelector('.lga-comments-more');assert.equal(more.hidden,false);more.click();await wait();const next=calls.filter(c=>c.name==='list_lga_post_comments')[1];assert.equal(next.args.p_before,first[29].created_at);assert.equal(next.args.p_before_id,first[29].id);
+ article.querySelector('.lga-comments-toggle').click();resolveOlder({data:[{id:'old',author_id:'other',body:'Late',author_name:'Old'}],error:null});await wait();assert.equal(article.querySelector('.lga-comments').childElementCount,0);dom.window.close();delete globalThis.document;
+});

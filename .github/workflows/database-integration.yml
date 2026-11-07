@@ -638,3 +638,105 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f tests/sql/joined_groups.sql
       - name: Test exact group invitee search and privacy
         run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_invite_search.sql
+      - name: Test group invitation sending limit
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_invitation_limit.sql
+      - name: Test draft LGA text feed
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_text_feed.sql
+      - name: Test draft LGA post reporting and moderation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_post_reporting.sql
+      - name: Test draft friend direct messages
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/direct_messages.sql
+      - name: Test draft friends list and friendship removal
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/friends_list.sql
+      - name: Test exact friend lookup and request display
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/friend_discovery.sql
+      - name: Test message and block concurrency
+        run: python3 tests/integration/message_block_races.py
+      - name: Test draft LGA post comments and likes
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_post_interactions.sql
+      - name: Test draft LGA comment reporting and moderation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_comment_reporting.sql
+      - name: Test draft content report triage and resolution
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_report_resolution.sql
+      - name: Test LGA interactions and block concurrency
+        run: python3 tests/integration/lga_interaction_block_races.py
+      - name: Test content report and moderation concurrency
+        run: python3 tests/integration/lga_report_races.py
+      - name: Test draft friend request notifications
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/friend_request_notifications.sql
+      - name: Test draft private-message reporting
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/direct_message_reporting.sql
+      - name: Test blocked-message safety review
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/blocked_message_safety_review.sql
+      - name: Test message pagination with tied timestamps
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/message_pagination.sql
+      - name: Test sender message hiding and retained safety evidence
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/message_hide.sql
+      - name: Test message report and hide concurrency
+        run: python3 tests/integration/message_report_hide_races.py
+      - name: Test direct message in-app notifications
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/direct_message_notifications.sql
+      - name: Test group invitation in-app notifications
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_invitation_notifications.sql
+      - name: Test self-only notification dismissal
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/dismiss_notifications.sql
+      - name: Test notification dismissal concurrency
+        run: python3 tests/integration/notification_dismiss_races.py
+      - name: Test private group text feed draft
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_feed.sql
+      - name: Test private group feed safety concurrency
+        run: python3 tests/integration/private_group_feed_races.py
+      - name: Test private group post reporting and moderation
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_post_reporting.sql
+      - name: Test group reporting and safety concurrency
+        run: python3 tests/integration/private_group_report_races.py
+      - name: Test LGA post and comment report evidence on deletion
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_report_evidence.sql
+      - name: Test LGA report and deletion concurrency
+        run: python3 tests/integration/lga_report_delete_races.py
+      - name: Test private saved LGA text posts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/saved_lga_posts.sql
+      - name: Test saved posts and block concurrency
+        run: python3 tests/integration/saved_post_block_races.py
+      - name: Test saved post quota and idempotency
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/saved_lga_post_limit.sql
+      - name: Test own text post editing and report evidence
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/edit_text_posts.sql
+      - name: Test post edit and report concurrency
+        run: python3 tests/integration/post_edit_report_races.py
+      - name: Test private group likes and privacy
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_likes.sql
+      - name: Test private group like safety concurrency
+        run: python3 tests/integration/private_group_like_races.py
+      - name: Test private group comments and reporting
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_comments.sql
+      - name: Test group comment and reporting concurrency
+        run: python3 tests/integration/private_group_comment_races.py
+      - name: Test group comment membership and moderation concurrency
+        run: python3 tests/integration/private_group_comment_moderation_races.py
+      - name: Test batched private group like summaries
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_like_batch.sql
+      - name: Test private group comment editing and report evidence
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/private_group_comment_edit.sql
+      - name: Test private group comment edit concurrency
+        run: python3 tests/integration/private_group_comment_edit_races.py
+      - name: Test LGA comment editing and report evidence
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_comment_edit.sql
+      - name: Test LGA comment edit concurrency
+        run: python3 tests/integration/lga_comment_edit_races.py
+      - name: Test batched LGA like summaries
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/lga_like_batch.sql
+      - name: Test shared text edit rate limit
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/content_edit_rate_limit.sql
+      - name: Test shared edit rate limit concurrency
+        run: python3 tests/integration/content_edit_limit_races.py
+      - name: Test voluntary private group rejoin
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_rejoin.sql
+      - name: Test group rejoin safety concurrency
+        run: python3 tests/integration/group_rejoin_races.py
+      - name: Test private group owner membership controls
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_owner_members.sql
+      - name: Test group owner member removal concurrency
+        run: python3 tests/integration/group_owner_members_races.py
+      - name: Test private group removal notifications
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/group_member_removal_notices.sql

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   preview:
-    # Create this protected environment and its secrets only after review.
+    # Environment is restricted to main; credentials target development only.
     environment: imdeltan-development
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1,0 +1,53 @@
+DO $test$ DECLARE a uuid:=gen_random_uuid();b uuid:=gen_random_uuid();c uuid:=gen_random_uuid();d uuid:=gen_random_uuid();moduser uuid:=gen_random_uuid();l uuid;rid uuid;BEGIN
+ SELECT id INTO l FROM public.lgas WHERE state_name='Delta' AND name='Uvwie';INSERT INTO auth.users(id) VALUES(a),(b),(c),(d),(moduser);INSERT INTO public.profiles(user_id,account_state,lga_id) SELECT v.id,'active',l FROM (VALUES(a),(b),(c),(d),(moduser))v(id);
+ INSERT INTO public.user_privacy_settings(user_id,profile_visibility,contact_permission) SELECT v.id,'public','members' FROM (VALUES(a),(b),(c),(d),(moduser))v(id);INSERT INTO public.user_eligibility(user_id,status,verification_method,verification_version,verified_at) SELECT v.id,'eligible','test','test',now() FROM (VALUES(a),(b),(c),(d),(moduser))v(id);
+ INSERT INTO public.policy_acceptances(user_id,policy_version_id) SELECT v.id,p.id FROM (VALUES(a),(b),(c),(d),(moduser))v(id) CROSS JOIN public.policy_versions p WHERE p.mandatory AND p.published_at<=now() AND p.retired_at IS NULL;SELECT id INTO rid FROM public.admin_roles WHERE role_key='moderator';INSERT INTO public.admin_role_assignments(user_id,role_id) VALUES(moduser,rid);
+ PERFORM set_config('test.gc_a',a::text,false);PERFORM set_config('test.gc_b',b::text,false);PERFORM set_config('test.gc_c',c::text,false);PERFORM set_config('test.gc_d',d::text,false);PERFORM set_config('test.gc_mod',moduser::text,false);
+ IF has_function_privilege('anon','public.list_private_group_post_comments(uuid,timestamptz,uuid)','EXECUTE') OR has_table_privilege('authenticated','public.private_group_post_comments','SELECT') THEN RAISE EXCEPTION 'Unsafe access';END IF;
+END $test$;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_a'),false);
+SELECT set_config('test.gc_group',public.create_group_in_own_lga('Group comments','')::text,false);SELECT set_config('test.gc_post',public.create_private_group_text_post(current_setting('test.gc_group')::uuid,'Parent')::text,false);
+SELECT public.invite_to_own_group(current_setting('test.gc_group')::uuid,current_setting('test.gc_b')::uuid);SELECT public.invite_to_own_group(current_setting('test.gc_group')::uuid,current_setting('test.gc_c')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_b'),false);SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.gc_group')::uuid),true);
+SELECT set_config('test.gc_comment',public.create_private_group_post_comment(current_setting('test.gc_post')::uuid,' Comment evidence ')::text,false);
+DO $test$ BEGIN BEGIN PERFORM public.report_private_group_post_comment(current_setting('test.gc_comment')::uuid,'self');RAISE EXCEPTION 'Self report';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_d'),false);
+DO $test$ BEGIN BEGIN PERFORM * FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid);RAISE EXCEPTION 'Nonmember read';EXCEPTION WHEN insufficient_privilege THEN NULL;END;BEGIN PERFORM public.report_private_group_post_comment(current_setting('test.gc_comment')::uuid,'outside');RAISE EXCEPTION 'Nonmember report';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_c'),false);SELECT public.respond_to_group_invitation((SELECT id FROM public.list_own_group_invitations() WHERE group_id=current_setting('test.gc_group')::uuid),true);
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid) WHERE id=current_setting('test.gc_comment')::uuid AND body='Comment evidence') THEN RAISE EXCEPTION 'Comment missing';END IF;END $test$;
+SELECT set_config('test.gc_report',public.report_private_group_post_comment(current_setting('test.gc_comment')::uuid,'Concern')::text,false);
+DO $test$ BEGIN IF public.report_private_group_post_comment(current_setting('test.gc_comment')::uuid,'Duplicate') IS NOT NULL THEN RAISE EXCEPTION 'Duplicate report';END IF;BEGIN PERFORM public.delete_own_private_group_post_comment(current_setting('test.gc_comment')::uuid);RAISE EXCEPTION 'Other author delete';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT public.block_user(current_setting('test.gc_b')::uuid);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid) WHERE id=current_setting('test.gc_comment')::uuid) THEN RAISE EXCEPTION 'Blocked comment visible';END IF;END $test$;
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_b'),false);SELECT public.delete_own_private_group_post_comment(current_setting('test.gc_comment')::uuid);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_mod'),false);SELECT set_config('request.jwt.claims','{"aal":"aal1"}',false);
+DO $test$ BEGIN BEGIN PERFORM * FROM public.list_private_group_comment_reports_for_review();RAISE EXCEPTION 'No MFA';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT set_config('request.jwt.claims','{"aal":"aal2"}',false);
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.list_private_group_comment_reports_for_review() WHERE report_id=current_setting('test.gc_report')::uuid AND comment_body='Comment evidence' AND comment_status='deleted') THEN RAISE EXCEPTION 'Evidence missing';END IF;
+ IF EXISTS(SELECT 1 FROM public.list_reports_for_review() WHERE id=current_setting('test.gc_report')::uuid) THEN RAISE EXCEPTION 'Wrong queue';END IF;BEGIN PERFORM public.review_user_report(current_setting('test.gc_report')::uuid,'closed','wrong queue');RAISE EXCEPTION 'Wrong review';EXCEPTION WHEN insufficient_privilege THEN NULL;END;END $test$;
+SELECT public.review_private_group_comment_report(current_setting('test.gc_report')::uuid,'closed','Deleted');
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_b'),false);
+SELECT set_config('test.gc_comment2',public.create_private_group_post_comment(current_setting('test.gc_post')::uuid,'Moderation text')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_a'),false);
+SELECT set_config('test.gc_report2',public.report_private_group_post_comment(current_setting('test.gc_comment2')::uuid,'Concern')::text,false);
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_mod'),false);SELECT public.remove_reported_private_group_comment(current_setting('test.gc_report2')::uuid,'Removal reason');
+SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_a'),false);
+DO $test$ BEGIN IF EXISTS(SELECT 1 FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid) WHERE id=current_setting('test.gc_comment2')::uuid) THEN RAISE EXCEPTION 'Removed comment visible';END IF;END $test$;
+RESET ROLE;
+DO $test$ BEGIN IF NOT EXISTS(SELECT 1 FROM public.moderation_records WHERE report_id=current_setting('test.gc_report2')::uuid AND action='private_group_comment_removed') THEN RAISE EXCEPTION 'Moderation record missing';END IF;END $test$;
+-- Deleted/removed comments still count toward the author limit.
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_b'),false);
+DO $test$ BEGIN
+ FOR i IN 1..18 LOOP PERFORM public.create_private_group_post_comment(current_setting('test.gc_post')::uuid,'Rate test '||i);END LOOP;
+ BEGIN PERFORM public.create_private_group_post_comment(current_setting('test.gc_post')::uuid,'Over limit');RAISE EXCEPTION 'Comment cap bypassed';EXCEPTION WHEN SQLSTATE 'P0001' THEN IF SQLERRM<>'Please try again later' THEN RAISE;END IF;END;
+ BEGIN PERFORM * FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid,now(),null);RAISE EXCEPTION 'Invalid cursor';EXCEPTION WHEN invalid_parameter_value THEN NULL;END;
+END $test$;RESET ROLE;
+INSERT INTO public.private_group_post_comments(post_id,author_id,body,created_at) SELECT current_setting('test.gc_post')::uuid,current_setting('test.gc_a')::uuid,'Older '||n,'2020-01-01T00:00:00Z'::timestamptz FROM generate_series(1,31)n;
+SET ROLE authenticated;SELECT set_config('request.jwt.claim.sub',current_setting('test.gc_a'),false);
+DO $test$ DECLARE boundary timestamptz;boundary_id uuid;n1 int;n2 int;total int;BEGIN
+ SELECT count(*) INTO n1 FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid);
+ SELECT created_at,id INTO boundary,boundary_id FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid) ORDER BY created_at,id LIMIT 1;
+ SELECT count(*) INTO n2 FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid,boundary,boundary_id);
+ SELECT count(DISTINCT id) INTO total FROM (SELECT id FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid) UNION ALL SELECT id FROM public.list_private_group_post_comments(current_setting('test.gc_post')::uuid,boundary,boundary_id)) pages;
+ IF n1<>30 OR n2<>19 OR total<>49 THEN RAISE EXCEPTION 'Group comment pagination gap or duplicate: %, %, %',n1,n2,total;END IF;
+END $test$;RESET ROLE;

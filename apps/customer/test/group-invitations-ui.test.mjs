@@ -1,25 +1,10 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
-import {JSDOM} from 'jsdom';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {JSDOM} from 'jsdom';
 const wait=()=>new Promise(r=>setTimeout(r,25));
-test('recipient sees own invitation, accepts it, and clears it on sign-out',async()=>{
- const dom=new JSDOM('<!doctype html><div id="app"></div>',{url:'https://development.invalid/',runScripts:'outside-only'}),{window}=dom;
- window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')};
- let invitations=[{id:'invite',group_name:'<svg onload=alert(1)>',lga_name:'Uvwie',created_at:'2026-01-01T00:00:00Z'}];const calls=[];
- window.__client={auth:{getSession:async()=>({data:{session:{user:{id:'synthetic'}}}}),onAuthStateChange:()=>({}),signOut:async()=>({error:null})},
- rpc:async(name,args)=>{calls.push({name,args});if(name==='list_own_group_invitations')return {data:invitations,error:null};
- if(name==='respond_to_group_invitation'){invitations=[];return {data:null,error:null}}
- if(name==='get_own_onboarding_status')return {data:[{account_state:'active',eligibility_status:'eligible',policy_complete:true}],error:null};
- if(name==='get_own_privacy_settings')return {data:[{profile_visibility:'private',contact_permission:'friends'}],error:null};
- if(['list_current_required_policies','list_own_blocks','list_delta_lgas','get_own_lga','list_own_created_groups'].includes(name))return {data:[],error:null};return {data:null,error:null}},
- from:(table)=>table==='profiles'?{select:()=>({maybeSingle:async()=>({data:{handle:'test_user',display_name:'Test',biography:''},error:null})})}:{select:()=>({order:()=>({limit:async()=>({data:[],error:null})})})}};
- let source=await readFile(new URL('../src/main.js',import.meta.url),'utf8');source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
- window.eval(source);await wait();assert.equal(window.document.querySelector('#invitations-list svg'),null);
- assert.match(window.document.querySelector('#invitations-list').textContent,/Uvwie/);
- window.document.querySelector('#invitations-list button').click();await wait();await wait();
- const call=calls.find(c=>c.name==='respond_to_group_invitation');assert.equal(call.args.p_invitation_id,'invite');assert.equal(call.args.p_accept,true);
- assert.equal(window.document.querySelector('#invitations-list').children.length,0);
- window.document.querySelector('#signout').click();await wait();assert.equal(window.document.querySelector('#group-invitations').hidden,true);assert.equal(window.document.querySelector('#invitations-message').textContent,'');
- dom.window.close();
-});
+async function setup(enabled,invitation){
+ const dom=new JSDOM('<!doctype html><div id="app"></div>',{url:'https://development.invalid/',runScripts:'outside-only'}),{window}=dom;window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')};let invitations=[invitation];const calls=[];
+ window.__client={auth:{getSession:async()=>({data:{session:{user:{id:'synthetic'}}}}),onAuthStateChange:()=>({}),signOut:async()=>({error:null})},rpc:async(name,args)=>{calls.push({name,args});if(name==='list_own_group_invitations')return {data:invitations,error:null};if(name==='respond_to_group_invitation'){invitations=[];return {data:null,error:null}}if(name==='get_own_onboarding_status')return {data:[{account_state:'active',eligibility_status:'eligible',policy_complete:true}],error:null};if(name==='get_own_privacy_settings')return {data:[{profile_visibility:'private',contact_permission:'friends'}],error:null};if(['list_current_required_policies','list_own_blocks','list_delta_lgas','get_own_lga','list_own_created_groups'].includes(name))return {data:[],error:null};return {data:null,error:null}},from:(table)=>table==='profiles'?{select:()=>({maybeSingle:async()=>({data:{handle:'test_user',display_name:'Test',biography:''},error:null})})}:{select:()=>({order:()=>({limit:async()=>({data:[],error:null})})})}};
+ let source=await readFile(new URL('../src/main.js',import.meta.url),'utf8');source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.DEV',enabled?'true':'false').replaceAll('import.meta.env.VITE_ENABLE_SOCIAL_DRAFTS',enabled?"'true'":"'false'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");window.eval(source);await wait();return {dom,window,calls};
+}
+const invitation={id:'invite',group_name:'<svg onload=alert(1)>',lga_name:'Uvwie',is_rejoin:true,created_at:'2026-01-01T00:00:00Z'};
+test('opt-in rejoin warns about restored activity and requires acceptance',async()=>{const t=await setup(true,invitation),d=t.window.document;assert.equal(d.querySelector('#invitations-list svg'),null);assert.match(d.querySelector('#invitations-list').textContent,/previous group posts, comments and likes visible again/);d.querySelector('#invitations-list button').click();await wait();await wait();const call=t.calls.find(c=>c.name==='respond_to_group_invitation');assert.equal(call.args.p_invitation_id,'invite');assert.equal(call.args.p_accept,true);assert.equal(d.querySelector('#invitations-list').children.length,0);d.querySelector('#signout').click();await wait();assert.equal(d.querySelector('#group-invitations').hidden,true);t.dom.window.close()});
+test('normal builds hide rejoin invitations but keep ordinary invitation flow',async()=>{const t=await setup(false,invitation),d=t.window.document;assert.equal(d.querySelector('#invitations-list').childElementCount,0);assert.equal(t.calls.some(c=>c.name==='respond_to_group_invitation'),false);t.dom.window.close();const normal=await setup(false,{...invitation,is_rejoin:false}),n=normal.window.document;assert.equal(n.querySelector('#invitations-list').childElementCount,1);n.querySelector('#invitations-list button').click();await wait();assert.equal(normal.calls.find(c=>c.name==='respond_to_group_invitation').args.p_accept,true);normal.dom.window.close()});

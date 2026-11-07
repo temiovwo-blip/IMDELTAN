@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {mountFriendsListDraft} from '../src/friends-list-draft.js';import {mountDirectMessagesDraft} from '../src/direct-messages-draft.js';
+const wait=()=>new Promise(r=>setTimeout(r,15));
+test('friend list opens a private conversation and removal refreshes the list',async()=>{
+ const dom=new JSDOM('<div id="friends"></div><div id="messages"></div>');globalThis.document=dom.window.document;globalThis.window=dom.window;window.confirm=()=>true;let friends=[{user_id:'friend',display_name:'<img src=x>',handle:'friend'}];const calls=[];
+ const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='list_own_friends')return {data:friends,error:null};if(name==='list_friend_conversations'||name==='list_friend_messages')return {data:[],error:null};if(name==='start_friend_conversation')return {data:'conversation',error:null};if(name==='remove_own_friend'){friends=[];return {error:null}}}};
+ const messages=mountDirectMessagesDraft(document.querySelector('#messages'),client,'me');const list=mountFriendsListDraft(document.querySelector('#friends'),client,(id,name)=>messages.openFriend(id,name),()=>messages.refresh());await wait();
+ assert.equal(document.querySelector('#friends img'),null);document.querySelector('.friend-row button').click();await wait();assert.equal(calls.find(c=>c.name==='start_friend_conversation').args.p_friend_id,'friend');assert.equal(document.querySelector('.messages-name').textContent,'<img src=x>');assert.equal(document.querySelector('.messages-name img'),null);
+ document.querySelectorAll('.friend-row button')[1].click();await wait();assert.equal(calls.find(c=>c.name==='remove_own_friend').args.p_friend_id,'friend');assert.equal(document.querySelectorAll('.friend-row').length,0);assert.equal(document.querySelector('.messages-thread').hidden,true);
+ messages.dispose();list.dispose();dom.window.close();delete globalThis.document;delete globalThis.window;
+});

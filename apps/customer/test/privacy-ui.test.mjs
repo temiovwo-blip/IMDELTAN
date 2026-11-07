@@ -24,7 +24,7 @@ test('privacy form loads, saves selected values, and clears at sign-out', async 
   };
   window.__client=client;
   let source=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
-  source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
+  source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.DEV','false').replaceAll('import.meta.env.VITE_ENABLE_SOCIAL_DRAFTS',"'false'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
   window.eval(source);
   await wait();
   const form=window.document.querySelector('#privacy-form');
@@ -63,7 +63,7 @@ test('late privacy response cannot redisplay settings after sign-out', async () 
     from:()=>({select:()=>({order:()=>({limit:async()=>({data:[],error:null})})})})
   };
   let source=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
-  source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
+  source=source.replace("import './style.css';",'').replace("import { createClient } from '@supabase/supabase-js';",'const createClient=()=>window.__client;').replaceAll('import.meta.env.VITE_SUPABASE_URL',"'https://development.invalid'").replaceAll('import.meta.env.DEV','false').replaceAll('import.meta.env.VITE_ENABLE_SOCIAL_DRAFTS',"'false'").replaceAll('import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY',"'test-public-key'");
   window.eval(source);await wait();
   assert.equal(typeof resolvePrivacy,'function');
   window.document.querySelector('#signout').click();await wait();

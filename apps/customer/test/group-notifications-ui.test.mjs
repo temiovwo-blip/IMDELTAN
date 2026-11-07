@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';import {mountSocialWorkspaceDraft} from '../src/social-workspace-draft.js';
+const wait=()=>new Promise(r=>setTimeout(r,20));
+test('group notice marks only itself and opens invitations without joining',async()=>{
+ const dom=new JSDOM('<div id="root"></div>');globalThis.document=dom.window.document;const calls=[];let opened=0;const client={rpc:async(name,args)=>{calls.push({name,args});if(name==='list_own_group_invitation_notifications')return {data:[{id:'notice',created_at:'2026-01-01T00:00:00Z',read_at:null}],error:null};return {data:[],error:null}}};
+ const root=document.querySelector('#root'),view=mountSocialWorkspaceDraft(root,client,'me',()=>opened++);await wait();root.querySelector('[data-social-tab=notifications]').click();await wait();assert.match(root.querySelector('.group-notice-row').textContent,/New group invitation/);root.querySelector('.group-notice-row button').click();await wait();assert.equal(calls.find(c=>c.name==='mark_own_group_invitation_notification_read').args.p_notification_id,'notice');assert.equal(opened,1);assert.equal(calls.some(c=>c.name==='respond_to_group_invitation'),false);view.dispose();assert.equal(root.childElementCount,0);dom.window.close();delete globalThis.document;
+});
